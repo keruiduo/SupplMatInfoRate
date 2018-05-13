@@ -1,0 +1,1912 @@
+---
+title: "The bio-cultural niche of language is optimised for information transmission"
+subtitle: "Full statistical analysis and plots"
+author: "Christophe Coupé, Dan Dediu and François Pellegrino"
+date: '`r Sys.time()`'
+output:
+  html_document:
+    fig_caption: yes
+    highlight: textmate
+    theme: readable
+    toc: yes
+    toc_depth: 6
+    toc_float: yes
+  word_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, echo=F, message=F, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(reshape2)
+library(rgl)
+library(gplots)
+library(cluster)
+library(fpc)
+library(factoextra)
+library(multcompView)
+library(moments)
+library(plyr)
+library(parallel)
+library(rmarkdown)
+library(stargazer)
+library(lmerTest)
+library(gamlss)
+library(gamlss.mx)
+library(sjstats)
+library(sjPlot)
+library(sjmisc)
+library(extrafont)
+library(moments);
+library(plyr);
+library(parallel);
+library(pander);
+
+knitr::opts_chunk$set(echo = TRUE, fig.align="center", warning=FALSE, message=FALSE,
+                      fig.width=9, fig.height=6, fig.align = "center", comment=NA,
+                      fig.path = "figures/", dpi=300, cache=TRUE, autodep=TRUE);
+dir.create("./figures", showWarnings=FALSE); # figures are saved here
+
+do.expensive.computations = FALSE; # force the expensive computations
+
+options(width = 250);
+options(contrasts=c("contr.treatment","contr.poly"));
+
+set.seed(3683); # For reproducibility of the results
+```
+
+<style>
+caption, .caption {
+color: #555555;
+font-weight: bold;
+font-size: 105%;
+text-align: left}
+
+a[hreflang]:before{}
+</style>
+
+```{r local_functions, echo=FALSE}
+# Local functions ####
+
+get_re_distrib <- function(v, myTitle = "") {
+  myDF <- data.frame(myCoef=v)
+  y <- quantile(myDF$myCoef, c(0.25, 0.75))
+  x <- qnorm(c(0.25, 0.75))
+  slope <- diff(y)/diff(x)
+  int <- y[1L] - slope * x[1L]
+  
+  p_re <- ggplot(data = myDF, aes(sample=myCoef)) + stat_qq() + ggtitle(myTitle)
+  p_re <- p_re + geom_abline(slope = slope, intercept = int) + theme(text = element_text(size=11, family="serif"))
+  
+  p_re
+}
+
+zeropad <- function(x, nz=1, exc.int=TRUE) {
+  if (is.integer(x) & exc.int) {
+    x
+  } else { 
+    sprintf(paste0("%.", nz, "f"), x)
+  }
+}
+
+analyses <- function(myModel) {
+  
+  # Preparing graphs
+  tmpDF <- data.frame(x=predict(myModel), y=residuals(myModel))
+  p_res <- ggplot(data=tmpDF, aes(x=x, y=y)) + geom_point(size=0.5) + xlab("Fitted values") + ylab("Quantile residuals")
+  p_res <- p_res + geom_smooth(method="loess")
+  p_res <- p_res + theme_minimal()
+  
+  p_qq <- get_re_distrib(tmpDF$y, "")
+  
+  momentsNames <- c("mean", "variance", "coef. of skewness", "coef. of kurtosis")
+  momentsValues <- zeropad(c(mean(tmpDF$y), var(tmpDF$y), skewness(tmpDF$y), kurtosis(tmpDF$y)), 3)
+  (tmpMoments <- data.frame(momentsNames, momentsValues))
+  
+  (coef <- coef(getSmo(myModel, "mu", which = 1)))
+  families_re_p <- get_re_distrib(coef, 'First random effect, mu')
+  
+  list(p_res, p_qq, tmpMoments, families_re_p)
+}
+
+
+lm.eqn <- function(m) {
+  
+  l <- list(a = format(coef(m)[1], digits = 2),
+            b = format(abs(coef(m)[2]), digits = 2),
+            r2 = format(summary(m)$r.squared, digits = 3));
+  
+  if (coef(m)[2] >= 0)  {
+    eq <- substitute(italic(y) == a + b %.% italic(x)*","~~italic(r)^2~"="~r2,l)
+  } else {
+    eq <- substitute(italic(y) == a - b %.% italic(x)*","~~italic(r)^2~"="~r2,l)    
+  }
+  
+  as.character(as.expression(eq));                 
+}
+
+display.graph.equation <- function(x, y, param1, param2, title) { 
+  df <- data.frame(x=x, y=y)
+  p <- ggplot(data = df, aes(x = x, y = y)) +
+       geom_smooth(method = "lm", se=FALSE, color="black", formula = y ~ x) + geom_point() + ggtitle(title) + xlab(param1) + ylab(param2) +
+       annotate("text", x=min(df$x), y=min(df$y), hjust = 0.2, vjust = 0.8, label = lm.eqn(lm(y ~ x, df)), colour="black", size = 5, parse=TRUE)
+
+  return (p)
+}
+
+display.correlation <- function(m, param1, param2, position, predictor.name, model.Name) {
+  x <- coef(getSmo(m, param1, which = position))
+  y <- coef(getSmo(m, param2, which = position))
+  
+  print(summary(x));
+  print(summary(y));
+  print(cor.test(x,y,method="pearson"));
+  print(cor.test(x,y,method="spearman"));
+
+  myTitle <- paste0(model.Name, ": ", param1, " and " , param2, " for ", predictor.name)
+  print(myTitle)
+  p <- display.graph.equation(x, y, param1, param2, myTitle)
+  return(p)
+}
+
+
+# http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/
+#
+# Multiple plot function
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  library(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
+```{r loading_data, echo=FALSE, message=FALSE, warning=FALSE}
+# Loading and preparing the data:
+
+info.rate.data <- read.table("./InfoRateData(2017).csv", header=TRUE, sep="\t", quote="", stringsAsFactors=FALSE);
+
+# Add language family data:
+info.rate.data$LgFam <- Vectorize(function(a) # assign language family to langauge codes
+{
+  switch(as.character(a),
+         "CAT" = "Indo-European",
+         "CMN" = "Sino-Tibetan",
+         "DEU" = "Indo-European",
+         "ENG" = "Indo-European",
+         "EUS" = "Basque",
+         "FIN" = "Uralic",
+         "FRA" = "Indo-European",
+         "HUN" = "Uralic",
+         "ITA" = "Indo-European",
+         "JPN" = "Japanese",
+         "KOR" = "Korean",
+         "SPA" = "Indo-European",
+         "SRP" = "Indo-European",
+         "THA" = "Tai-Kadai",
+         "TUR" = "Turkic",
+         "VIE" = "Austroasiatic",
+         "YUE" = "Sino-Tibetan",
+         NA)
+  
+}, "a")(as.character(info.rate.data$Language));
+
+# Convert to factors:
+info.rate.data$Text <- as.factor(info.rate.data$Text)
+info.rate.data$Code_Spker <- as.factor(info.rate.data$Code_Spker)
+info.rate.data$Language <- as.factor(info.rate.data$Language)
+info.rate.data$Sex <- as.factor(info.rate.data$Sex)
+
+# Rename variables:
+# Language -> Language
+# Text -> Text
+# Spker -> Spker 
+# Code_Spker -> Speaker
+# Sex -> Sex
+# Duration -> Duration
+# NbSyllables -> NS
+# SpeechRate -> SR
+# ShannonEntropy -> ShE
+# ConditionalEntropy -> ID
+# InfoRate_ShannonEntropy -> ShIR
+# InfoRate_ConditionalEntropy -> IR
+# LgFam -> Family
+names(info.rate.data) <- c("Language", "Text", "Spker", "Speaker", "Sex", "Duration", "NS", "SR", "ShE", "ID", "ShIR", "IR", "Family")
+```
+
+
+## Introduction
+
+This `Rmarkdown` script (and corresponding TAB-separated CSV input data file `InfoRateData(2017).csv` and the resulting `HTML` document) contain the full analysis and plotting code accompanying the paper *The bio-cultural niche of language is optimised for information transmission*.
+
+
+## The data
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Transform it into the long format:
+info.rate.data.long <- melt(info.rate.data, id.vars=c("Language", "Text", "Spker", "Speaker", "Sex", "Family"));
+# Extract speakers, languages and texts:
+speakers <- sort(unique(info.rate.data$Speaker)); 
+languages <- sort(unique(info.rate.data$Language)); 
+lgfams <- sort(unique(info.rate.data$Family)); 
+texts <- sort(unique(info.rate.data$Text)); 
+```
+
+For more information on the data, please see [Oh (2015)](#references).
+There are in total `r length(unique(info.rate.data$Language))` languages (see the Table below).
+
+### The Oral Corpus
+
+The oral corpus is based on a subset of the *Multext* (Multilingual Text Tools and Corpora) parallel corpus [(Campione & Véronis, 1998)](#campioneveronis1998) in *British English*, *German*, and *Italian*. 
+The material consists of 15 short texts of 3-5 semantically connected sentences carefully translated by a native speaker in each language. 
+
+For the other 14 languages, two of the authors supervised the translation and recording of new datasets. 
+All participants were native speakers of the target language, with a focus on a specific variety of the language when possible – e.g. *Mandarin* spoken in Beijing, *Serbian* in Belgrade and *Korean* in Seoul. 
+No strict control on age or on the speakers’ social diversity was performed, but speakers were mainly students or members of academic institutions.
+Speakers were asked to read three times (first silently and then loudly twice) each text. 
+The texts were presented one by one on the screen in random order, in a self-paced reading paradigm. 
+This way, speakers familiarized themselves with the text and reduce their reading errors.
+The second loud recording was analyzed in this study.
+
+### Text Corpus
+
+Text datasets were acquired from various sources as illustrated in the Table below. 
+After an initial data curation, each dataset was phonetically transcribed and automatically syllabiﬁed by a rule-based program written by one of the authors, except in the following cases: 
+
+  i) when syllabiﬁcation was already provided with the dataset (*English*, *French*, *German*, and *Vietnamese* for the multisyllabic words); 
+  ii) when the corpus was syllabiﬁed by an automatic grapheme-to-phoneme converter (*Catalan*, *Spanish*, and *Thai*). 
+  
+Additionally, no syllabiﬁcation was required for Sino-Tibetan languages (*Cantonese* and *Mandarin Chinese*) since one ideogram corresponds to one syllable.
+
+
+| Language         | Family         | ISO 639-3 | Corpus                                                      |
+|------------------|----------------|-----------|-------------------------------------------------------------|
+| Basque           | Basque         | EUS       | E-Hitz [(Perea et al., 2006)](#references)                  |
+| British English  | Indo-European  | ENG       | WebCelex (MPI for Psycholinguistics)                        |
+| Cantonese        | Sino-Tibetan   | YUE       | A linguistic corpus of mid-20th century Hong Kong Cantonese |
+| Catalan          | Indo-European  | CAT       | Frequency dictionary [(Zséder et al., 2012)](#references)   |
+| Finnish          | Uralic         | FIN       | Finnish Parole Corpus                                       |
+| French           | Indo-European  | FRA       | Lexique 3.80 [(New et al., 2001)](#references)              |
+| German           | Indo-European  | DEU       | WebCelex (MPI for Psycholinguistics)                        |
+| Hungarian        | Uralic         | HUN       | Hungarian National Corpus [(Váradi, 2002)](#references)     |
+| Italian          | Indo-European  | ITA       | The Corpus PAISÀ [(Lyding et al., 2014)](#references)       |
+| Japanese         | Japanese       | JPN       | Japanese Internet Corpus [(Sharoff, 2006)](#references)     |
+| Korean           | Korean         | KOR       | Leipzig Corpora Collection (LCC)                            |
+| Mandarin Chinese | Sino-Tibetan   | CMN       | Chinese Internet Corpus [(Sharoff, 2006)](#references)      |
+| Serbian          | Indo-European  | SRP       | Frequency dictionary [(Zséder et al., 2012)](#references)   |
+| Spanish          | Indo-European  | SPA       | Frequency dictionary [(Zséder et al., 2012)](#references)   |
+| Thai             | Tai-Kadai      | THA       | Thai National Corpus (TNC)                                  |
+| Turkish          | Turkic         | TUR       | Leipzig Corpora Collection (LCC)                            |
+| Vietnamese       | Austroasiatic  | VIE       | VNSpeechCorpus [(Le et al., 2004)](#references)             |
+
+### Dataset structure
+
+The data is structured as follows:
+
+  - *Language* is the unique language ID with `r length(unique(info.rate.data$Language))` possible values `r paste0('"',sort(unique(info.rate.data$Language)),'"',collapse=", ")`;
+  - *Language family* is the language family with `r length(unique(info.rate.data$Family))` possible values `r paste0('"',sort(unique(info.rate.data$Family)),'"',collapse=", ")`;
+  - *Text* is the text identifier (similar across languages and speakers) with `r length(unique(info.rate.data$Text))` possible values `r paste0('"',sort(unique(info.rate.data$Text)),'"',collapse=", ")`;
+  - *Spker* and is the unique speaker ID with possible values: `r length(unique(info.rate.data$Spker))` -- a speaker might have produced texts in more than one language or the same code might have been use more than once;
+  - *Speaker* is the concatenation of the speaker's language and ID (a speaker may produce more than a single language): `r length(unique(info.rate.data$Speaker))`;
+  - *Sex* is the speaker's sex;
+  - *Duration* is the texts' duration in seconds as spoken by the given speaker;
+  - *NS* is the texts' number of of syllables (the same for a given text in a given language);
+  - *SR* is the speech rate (syllables/second) for a given text spoken by a given speaker;
+  - *ShE* and *ID* are language-level entropy estimates;
+  - *ShIR* and *IR* are text x speaker properties obtained by multiplying *SR* by *ShE* and *ID* respectively.
+  
+
+### Exploratory plots and summaries
+
+#### NS
+
+```{r NS by Language and Text, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10, fig.cap="NS: exploratory plots."}
+tmp <- info.rate.data; 
+tmp$Language <- factor(tmp$Language, levels=c("VIE","EUS","CAT","DEU","ENG","FRA","ITA","SPA","SRP","JPN","KOR","CMN","YUE","THA","TUR","FIN","HUN"));
+tmp$Family <- factor(tmp$Family); tmp$Family <- revalue(tmp$Family, c("Austroasiatic"="AA", "Basque"="B", "Indo-European"="IE", "Japanese"="J", "Korean"="K", "Sino-Tibetan"="ST", "Tai-Kadai"="TK", "Turkic"="T", "Uralic"="U"));
+multiplot(plotlist=list(ggplot(tmp, aes(x=NS)) + geom_histogram(col="yellow") + xlab("NS"),
+                        {
+                          # From http://mgimond.github.io/ES218/Week06a.html:
+                          y     <- quantile(tmp$NS, c(0.25, 0.75)) # Find the 1st and 3rd quartiles
+                          x     <- qnorm( c(0.25, 0.75))         # Find the matching normal values on the x-axis
+                          slope <- diff(y) / diff(x)             # Compute the line slope
+                          int   <- y[1] - slope * x[1]           # Compute the line intercept
+                          ggplot(tmp, aes(sample=NS))+stat_qq(distribution=qnorm, color="royalblue", alpha=0.5) + geom_abline(intercept=int, slope=slope, color="firebrick2")
+                        },
+                        ggplot(tmp, aes(x=Language, y=NS, colour=Family)) + geom_boxplot() + ylab("NS") + theme(axis.text.x = element_text(angle = 45, hjust = 1)),
+                        ggplot(tmp, aes(x=Text, y=NS, colour=substr(Text,1,1))) + geom_boxplot() + ylab("NS") + scale_color_discrete(name = "Text") + theme(axis.text.x = element_text(angle = 45, hjust = 1))),
+          cols=2);
+```
+
+```{r , echo=FALSE, message=FALSE, warning=FALSE}
+cat(paste0("mean=",round(mean(tmp$NS,na.rm=TRUE),3),", ",
+           "median=",round(median(tmp$NS,na.rm=TRUE),3),", ",
+           "sd=",round(sd(tmp$NS,na.rm=TRUE),3),", ",
+           "CV=",round(sd(tmp$NS,na.rm=TRUE) / mean(tmp$NS,na.rm=TRUE),3),", ",
+           "min=",round(min(tmp$NS,na.rm=TRUE),3),", ",
+           "max=",round(max(tmp$NS,na.rm=TRUE),3),", ",
+           "kurtosis=",round(kurtosis(tmp$NS,na.rm=TRUE),3),", ",
+           "skewness=",round(skewness(tmp$NS,na.rm=TRUE),3),".\n"));
+```
+
+#### SR
+
+```{r SR by Language and Text, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10, fig.cap="SR: exploratory plots."}
+multiplot(plotlist=list(ggplot(tmp, aes(x=SR)) + geom_histogram(col="yellow") + xlab("SR"),
+                        {
+                          # From http://mgimond.github.io/ES218/Week06a.html:
+                          y     <- quantile(tmp$SR, c(0.25, 0.75)) # Find the 1st and 3rd quartiles
+                          x     <- qnorm( c(0.25, 0.75))         # Find the matching normal values on the x-axis
+                          slope <- diff(y) / diff(x)             # Compute the line slope
+                          int   <- y[1] - slope * x[1]           # Compute the line intercept
+                          ggplot(tmp, aes(sample=SR))+stat_qq(distribution=qnorm, color="royalblue", alpha=0.5) + geom_abline(intercept=int, slope=slope, color="firebrick2")
+                        },
+                        ggplot(tmp, aes(x=Language, y=SR, colour=Family)) + geom_boxplot() + ylab("SR") + theme(axis.text.x = element_text(angle = 45, hjust = 1)),
+                        ggplot(tmp, aes(x=Text, y=SR, colour=substr(Text,1,1))) + geom_boxplot() + ylab("SR") + scale_color_discrete(name = "Text") + theme(axis.text.x = element_text(angle = 45, hjust = 1))),
+          cols=2);
+```
+
+```{r SR by Speaker, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="SR per speaker."}
+ggplot(info.rate.data, aes(x=Speaker, y=SR, color=Language)) + geom_boxplot() + ylab("SR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+```
+
+```{r SR distributions by language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=6, fig.cap="SR by language."}
+ggplot(info.rate.data, aes(SR, fill = Language, colour = Language)) +
+  geom_density(alpha = 0.1) + geom_density(aes(SR), data=info.rate.data, fill=NA, color="black") + xlab("SR")
+```
+
+```{r , echo=FALSE, message=FALSE, warning=FALSE}
+cat(paste0("mean=",round(mean(tmp$SR,na.rm=TRUE),3),", ",
+           "median=",round(median(tmp$SR,na.rm=TRUE),3),", ",
+           "sd=",round(sd(tmp$SR,na.rm=TRUE),3),", ",
+           "CV=",round(sd(tmp$SR,na.rm=TRUE) / mean(tmp$SR,na.rm=TRUE),3),", ",
+           "min=",round(min(tmp$SR,na.rm=TRUE),3),", ",
+           "max=",round(max(tmp$SR,na.rm=TRUE),3),", ",
+           "kurtosis=",round(kurtosis(tmp$SR,na.rm=TRUE),3),", ",
+           "skewness=",round(skewness(tmp$SR,na.rm=TRUE),3),".\n"));
+```
+
+
+
+#### ShE and ID
+
+```{r ShE and ID, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10, fig.cap="ShE and ID: exploratory plots."}
+multiplot(plotlist=list(ggplot(tmp, aes(x=ShE)) + geom_histogram(col="yellow") + xlab("ShE"),
+                        {
+                          # From http://mgimond.github.io/ES218/Week06a.html:
+                          y     <- quantile(tmp$ShE, c(0.25, 0.75)) # Find the 1st and 3rd quartiles
+                          x     <- qnorm( c(0.25, 0.75))         # Find the matching normal values on the x-axis
+                          slope <- diff(y) / diff(x)             # Compute the line slope
+                          int   <- y[1] - slope * x[1]           # Compute the line intercept
+                          ggplot(tmp, aes(sample=ShE))+stat_qq(distribution=qnorm, color="royalblue", alpha=0.5) + geom_abline(intercept=int, slope=slope, color="firebrick2")
+                        },
+                        ggplot(tmp, aes(x=ID)) + geom_histogram(col="yellow") + xlab("ID"),
+                        {
+                          # From http://mgimond.github.io/ES218/Week06a.html:
+                          y     <- quantile(tmp$ID, c(0.25, 0.75)) # Find the 1st and 3rd quartiles
+                          x     <- qnorm( c(0.25, 0.75))         # Find the matching normal values on the x-axis
+                          slope <- diff(y) / diff(x)             # Compute the line slope
+                          int   <- y[1] - slope * x[1]           # Compute the line intercept
+                          ggplot(tmp, aes(sample=ID))+stat_qq(distribution=qnorm, color="royalblue", alpha=0.5) + geom_abline(intercept=int, slope=slope, color="firebrick2")
+                        }),
+          cols=2);
+```
+
+```{r ShE vs ID, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=6, fig.cap="ShE vs ID."}
+tmp1 <- unique(info.rate.data[,c("Language","ShE","ID","Family")]);
+ggplot(tmp1, aes(x=ShE, y=ID, color=Family)) + 
+  geom_text(aes(label=Language)) + geom_smooth(method="lm", color="black") + xlab("ShE") + ylab("ID");
+cor.test(tmp1$ShE, tmp1$ID, method="pearson");
+cor.test(tmp1$ShE, tmp1$ID, method="spearman");
+t.test(tmp1$ShE, tmp1$ID, paired=TRUE);
+```
+
+*ShE:*
+```{r , echo=FALSE, message=FALSE, warning=FALSE}
+cat(paste0("mean=",round(mean(tmp$ShE,na.rm=TRUE),3),", ",
+           "median=",round(median(tmp$ShE,na.rm=TRUE),3),", ",
+           "sd=",round(sd(tmp$ShE,na.rm=TRUE),3),", ",
+           "CV=",round(sd(tmp$ShE,na.rm=TRUE) / mean(tmp$ShE,na.rm=TRUE),3),", ",
+           "min=",round(min(tmp$ShE,na.rm=TRUE),3),", ",
+           "max=",round(max(tmp$ShE,na.rm=TRUE),3),", ",
+           "kurtosis=",round(kurtosis(tmp$ShE,na.rm=TRUE),3),", ",
+           "skewness=",round(skewness(tmp$ShE,na.rm=TRUE),3),".\n"));
+```
+
+*ID:*
+```{r , echo=FALSE, message=FALSE, warning=FALSE}
+cat(paste0("mean=",round(mean(tmp$ID,na.rm=TRUE),3),", ",
+           "median=",round(median(tmp$ID,na.rm=TRUE),3),", ",
+           "sd=",round(sd(tmp$ID,na.rm=TRUE),3),", ",
+           "CV=",round(sd(tmp$ID,na.rm=TRUE) / mean(tmp$ID,na.rm=TRUE),3),", ",
+           "min=",round(min(tmp$ID,na.rm=TRUE),3),", ",
+           "max=",round(max(tmp$ID,na.rm=TRUE),3),", ",
+           "kurtosis=",round(kurtosis(tmp$ID,na.rm=TRUE),3),", ",
+           "skewness=",round(skewness(tmp$ID,na.rm=TRUE),3),".\n"));
+```
+
+#### ShIR and IR
+
+```{r ShIR by Language and Text, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10, fig.cap="ShIR: exploratory plots."}
+multiplot(plotlist=list(ggplot(tmp, aes(x=ShIR)) + geom_histogram(col="yellow") + xlab("ShIR"),
+                        {
+                          # From http://mgimond.github.io/ES218/Week06a.html:
+                          y     <- quantile(tmp$ShIR, c(0.25, 0.75)) # Find the 1st and 3rd quartiles
+                          x     <- qnorm( c(0.25, 0.75))         # Find the matching normal values on the x-axis
+                          slope <- diff(y) / diff(x)             # Compute the line slope
+                          int   <- y[1] - slope * x[1]           # Compute the line intercept
+                          ggplot(tmp, aes(sample=ShIR))+stat_qq(distribution=qnorm, color="royalblue", alpha=0.5) + geom_abline(intercept=int, slope=slope, color="firebrick2")
+                        },
+                        ggplot(tmp, aes(x=Language, y=ShIR, colour=Family)) + geom_boxplot() + ylab("ShIR") + theme(axis.text.x = element_text(angle = 45, hjust = 1)),
+                        ggplot(tmp, aes(x=Text, y=ShIR, colour=substr(Text,1,1))) + geom_boxplot() + ylab("ShIRe") + scale_color_discrete(name = "Text") + theme(axis.text.x = element_text(angle = 45, hjust = 1))),
+          cols=2);
+```
+
+```{r ShIR by Speaker, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="ShIR per speaker."}
+ggplot(info.rate.data, aes(x=Speaker, y=ShIR, color=Language)) + geom_boxplot() + ylab("ShIR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+```
+
+```{r ShIR distributions by language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=6, fig.cap="ShIR by language."}
+ggplot(info.rate.data, aes(ShIR, fill = Language, colour = Language)) +
+  geom_density(alpha = 0.1) + geom_density(aes(ShIR), data=info.rate.data, fill=NA, color="black") + xlab("ShIR")
+```
+
+```{r IR by Language and Text, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10, fig.cap="IR: exploratory plots."}
+multiplot(plotlist=list(ggplot(tmp, aes(x=IR)) + geom_histogram(col="yellow") + xlab("IR"),
+                        {
+                          # From http://mgimond.github.io/ES218/Week06a.html:
+                          y     <- quantile(tmp$IR, c(0.25, 0.75)) # Find the 1st and 3rd quartiles
+                          x     <- qnorm( c(0.25, 0.75))         # Find the matching normal values on the x-axis
+                          slope <- diff(y) / diff(x)             # Compute the line slope
+                          int   <- y[1] - slope * x[1]           # Compute the line intercept
+                          ggplot(tmp, aes(sample=IR))+stat_qq(distribution=qnorm, color="royalblue", alpha=0.5) + geom_abline(intercept=int, slope=slope, color="firebrick2")
+                        },
+                        ggplot(tmp, aes(x=Language, y=IR, colour=Family)) + geom_boxplot() + ylab("IR") + theme(axis.text.x = element_text(angle = 45, hjust = 1)),
+                        ggplot(tmp, aes(x=Text, y=IR, colour=substr(Text,1,1))) + geom_boxplot() + ylab("IRe") + scale_color_discrete(name = "Text") + theme(axis.text.x = element_text(angle = 45, hjust = 1))),
+          cols=2);
+```
+
+```{r IR by Speaker, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="IR per speaker."}
+ggplot(info.rate.data, aes(x=Speaker, y=IR, color=Language)) + geom_boxplot() + ylab("IR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+```
+
+```{r IR distributions by language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=6, fig.cap="IR by language."}
+ggplot(info.rate.data, aes(IR, fill = Language, colour = Language)) +
+  geom_density(alpha = 0.1) + geom_density(aes(IR), data=info.rate.data, fill=NA, color="black") + xlab("IR")
+```
+
+*ShIR:*
+```{r , echo=FALSE, message=FALSE, warning=FALSE}
+cat(paste0("mean=",round(mean(tmp$ShIR,na.rm=TRUE),3),", ",
+           "median=",round(median(tmp$ShIR,na.rm=TRUE),3),", ",
+           "sd=",round(sd(tmp$ShIR,na.rm=TRUE),3),", ",
+           "CV=",round(sd(tmp$ShIR,na.rm=TRUE) / mean(tmp$ShIR,na.rm=TRUE),3),", ",
+           "min=",round(min(tmp$ShIR,na.rm=TRUE),3),", ",
+           "max=",round(max(tmp$ShIR,na.rm=TRUE),3),", ",
+           "kurtosis=",round(kurtosis(tmp$ShIR,na.rm=TRUE),3),", ",
+           "skewness=",round(skewness(tmp$ShIR,na.rm=TRUE),3),".\n"));
+```
+
+*IR:*
+```{r , echo=FALSE, message=FALSE, warning=FALSE}
+cat(paste0("mean=",round(mean(tmp$IR,na.rm=TRUE),3),", ",
+           "median=",round(median(tmp$IR,na.rm=TRUE),3),", ",
+           "sd=",round(sd(tmp$IR,na.rm=TRUE),3),", ",
+           "CV=",round(sd(tmp$IR,na.rm=TRUE) / mean(tmp$IR,na.rm=TRUE),3),", ",
+           "min=",round(min(tmp$IR,na.rm=TRUE),3),", ",
+           "max=",round(max(tmp$IR,na.rm=TRUE),3),", ",
+           "kurtosis=",round(kurtosis(tmp$IR,na.rm=TRUE),3),", ",
+           "skewness=",round(skewness(tmp$IR,na.rm=TRUE),3),".\n"));
+```
+
+
+#### SR and ID
+
+```{r SR vs ID, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=6, fig.cap="SR vs ID"}
+ggplot(info.rate.data, aes(y=SR, x=ID, color=Family)) + ylim(range(info.rate.data$SR)+c(0.0,0.5)) + 
+  geom_point(alpha=0.5, size=1) + 
+  geom_smooth(aes(y=SR, x=ID), method="lm", color="yellow") +
+  geom_smooth(aes(y=SR, x=ID), method="loess", color="black") + 
+  geom_text(aes(x=ID, label=Language), data=unique(info.rate.data[,c("ID","Language","Family")]), y=max(info.rate.data$SR), angle=90, hjust=-0.30, size=3, show.legend = FALSE) +
+  ylab("SR") + xlab("ID");
+cor.test(info.rate.data$SR, info.rate.data$ID, method="pearson");
+cor.test(info.rate.data$SR, info.rate.data$ID, method="spearman");
+```
+
+
+
+## Linear Mixed Modells (LMMs)
+
+
+### Linear ICCs
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+tmp1 <- icc(lmer(NS ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker), data=info.rate.data))
+knitr::kable(data.frame("f"=c("Text", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Language"], tmp1["Speaker"])), 
+             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `NS ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker)`.");
+
+tmp1 <- icc(lmer(SR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker), data=info.rate.data))
+knitr::kable(data.frame("f"=c("Text", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Language"], tmp1["Speaker"])), 
+             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `SR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker)`.");
+
+tmp1 <- icc(lmer(ShIR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker), data=info.rate.data))
+knitr::kable(data.frame("f"=c("Text", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Language"], tmp1["Speaker"])), 
+             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `ShIR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker)`.");
+
+tmp1 <- icc(lmer(IR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker), data=info.rate.data))
+knitr::kable(data.frame("f"=c("Text", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Language"], tmp1["Speaker"])), 
+             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `IR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker)`.");
+```
+
+
+### SR
+
+#### Comparing models
+
+```{r SR_lmm, echo=F}
+lmr0 <- lmer(SR ~ 1 + (1 | Text) + (1 | Language) + (1 | Speaker), data=info.rate.data);
+lmr1 <- lmer(SR ~ 1 + (1 | Language) + (1 | Speaker), data=info.rate.data);
+lmr2 <- lmer(SR ~ 1 + (1 | Text) + (1 | Speaker), data=info.rate.data);
+lmr3 <- lmer(SR ~ 1 + (1 | Text) + (1 | Language), data=info.rate.data);
+lmr4 <- lmer(SR ~ 1 + Sex + (1 | Text) + (1 | Language) + (1 | Speaker), data=info.rate.data);
+lmr5 <- lmer(SR ~ 1 + Sex + (1 | Language) + (1 | Speaker), data=info.rate.data);
+lmr6 <- lmer(SR ~ 1 + Sex + (1 | Text) + (1 | Speaker), data=info.rate.data);
+lmr7 <- lmer(SR ~ 1 + Sex + (1 | Text) + (1 | Language), data=info.rate.data);
+
+tmp <- do.call(rbind, lapply(list(lmr0, lmr1, lmr2, lmr3, lmr4, lmr5, lmr6, lmr7), 
+                function(lmr) data.frame("model"=as.character(summary(lmr, ddf="lme4")$call$formula)[3], "AIC"=round(AIC(lmr),2), "BIC"=round(BIC(lmr),2))));
+tmp$AIC[ which.min(tmp$AIC) ] <- paste0("**",tmp$AIC[ which.min(tmp$AIC) ],"**");
+tmp$BIC[ which.min(tmp$BIC) ] <- paste0("**",tmp$BIC[ which.min(tmp$BIC) ],"**");
+
+knitr::kable(tmp, row.names=FALSE, caption="AIC and BIC for various hierarchical models of `SR` (in **bold** are the minimum values).");
+```
+
+#### Residuals and random effects
+
+We consider here the full model `SR ~ 1 + Sex +  (1|Text) + (1|Language) + (1|Speaker)`.
+
+```{r SR_assumptions, echo=F}
+lmr <- lmer(SR ~ 1 + Sex +  (1|Text) + (1|Language) + (1|Speaker), data=info.rate.data)
+# summary(lmr)
+plot(lmr)
+get_re_distrib(residuals(lmr), "Residuals")
+get_re_distrib(ranef(lmr)$Text[,1], "Levels of Text as random effect")
+get_re_distrib(ranef(lmr)$Language[,1],  "Levels of Language as random effect")
+get_re_distrib(ranef(lmr)$Speaker[,1], "Levels of Speaker as random effect")
+sjp.lmer(lmr0,
+         facet.grid = FALSE,
+         sort.est = "sort.all",
+         y.offset = .4)
+```
+
+
+### IR
+
+#### Comparing models
+
+```{r IR_lmm, echo=F}
+lmr0 <- lmer(IR ~ 1 + (1 | Text) + (1 | Language) + (1 | Speaker), data=info.rate.data);
+lmr1 <- lmer(IR ~ 1 + (1 | Language) + (1 | Speaker), data=info.rate.data);
+lmr2 <- lmer(IR ~ 1 + (1 | Text) + (1 | Speaker), data=info.rate.data);
+lmr3 <- lmer(IR ~ 1 + (1 | Text) + (1 | Language), data=info.rate.data);
+lmr4 <- lmer(IR ~ 1 + Sex + (1 | Text) + (1 | Language) + (1 | Speaker), data=info.rate.data);
+lmr5 <- lmer(IR ~ 1 + Sex + (1 | Language) + (1 | Speaker), data=info.rate.data);
+lmr6 <- lmer(IR ~ 1 + Sex + (1 | Text) + (1 | Speaker), data=info.rate.data);
+lmr7 <- lmer(IR ~ 1 + Sex + (1 | Text) + (1 | Language), data=info.rate.data);
+
+tmp <- do.call(rbind, lapply(list(lmr0, lmr1, lmr2, lmr3, lmr4, lmr5, lmr6, lmr7), 
+                function(lmr) data.frame("model"=as.character(summary(lmr, ddf="lme4")$call$formula)[3], "AIC"=round(AIC(lmr),2), "BIC"=round(BIC(lmr),2))));
+tmp$AIC[ which.min(tmp$AIC) ] <- paste0("**",tmp$AIC[ which.min(tmp$AIC) ],"**");
+tmp$BIC[ which.min(tmp$BIC) ] <- paste0("**",tmp$BIC[ which.min(tmp$BIC) ],"**");
+
+knitr::kable(tmp, row.names=FALSE, caption="AIC and BIC for various hierarchical models of `IR` (in **bold** are the minimum values).");
+```
+
+#### Residuals and random effects
+
+We consider here the full model `IR ~ 1 + Sex +  (1|Text) + (1|Language) + (1|Speaker)`.
+
+```{r IR_assumptions, echo=F}
+lmr <- lmer(IR ~ 1 + Sex +  (1|Text) + (1|Language) + (1|Speaker), data=info.rate.data)
+#summary(lmr)
+plot(lmr)
+get_re_distrib(residuals(lmr), "Residuals")
+get_re_distrib(ranef(lmr)$Text[,1], "Levels of Text as random effect")
+get_re_distrib(ranef(lmr)$Language[,1],  "Levels of Language as random effect")
+get_re_distrib(ranef(lmr)$Speaker[,1], "Levels of Speaker as random effect")
+sjp.lmer(lmr0,
+         facet.grid = FALSE,
+         sort.est = "sort.all",
+         y.offset = .4)
+```
+
+
+## Generalized Additive Models for Location, Scale and Shape (GAMLSS)
+
+We will use a Gaussian distribution (with fixed or modelled variance).
+
+### SR
+
+#### Fixed or modelled *&sigma;* (variance)
+
+##### Fixed *&sigma;* 
+```{r SR_check_NO_no_sigma, echo=FALSE}
+model.NO.no.modelled.sigma.SR <- gamlss(SR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
+                                        data=info.rate.data, family=NO(mu.link="identity"),
+                                        control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+
+plot(model.NO.no.modelled.sigma.SR)
+wp(model.NO.no.modelled.sigma.SR, ylim.all=0.4)
+cat("\nDeviance=",deviance(model.NO.no.modelled.sigma.SR,  what = "G"),"\n");
+cat("\nAIC=",AIC(model.NO.no.modelled.sigma.SR),"\n");
+```
+
+##### Modelled *&sigma;* 
+
+```{r SR_check_NO, echo=FALSE}
+model.NO.SR <- gamlss(SR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
+                      sigma.fo = ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
+                      data=info.rate.data, family=NO(mu.link="identity"), 
+                      control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+
+plot(model.NO.SR)
+wp(model.NO.SR, ylim.all=0.4)
+cat("\nDeviance=",deviance(model.NO.SR,  what = "G"),"\n");
+cat("\nAIC=",AIC(model.NO.SR),"\n");
+```
+
+The distribution of the residuals is less heteroscedastic than before and the fit to the data better.
+The full summary of the model is:
+
+```{r SR_summary, echo=FALSE}
+summary(model.NO.SR)
+```
+
+#### Random effects
+
+##### *&mu;*
+
+**Text**
+```{r SR_re_mu_text, echo=FALSE}
+getSmo(model.NO.SR, "mu", which = 1)
+```
+**Language**
+```{r SR_re_mu_lg, echo=FALSE}
+getSmo(model.NO.SR, "mu", which = 2)
+```
+**Speaker**
+```{r SR_re_mu_spk, echo=FALSE}
+getSmo(model.NO.SR, "mu", which = 3)
+``` 
+
+##### *&sigma;*
+
+**Text**
+```{r SR_re_sigma_text, echo=FALSE}
+getSmo(model.NO.SR, "sigma", which = 1)
+```
+**Language**
+```{r SR_re_sigma_lg, echo=FALSE}
+getSmo(model.NO.SR, "sigma", which = 2)
+```
+**Speaker**
+```{r SR_re_sigma_spk, echo=FALSE}
+getSmo(model.NO.SR, "sigma", which = 3)
+``` 
+
+
+### IR
+
+#### Fixed or modelled *&sigma;* (variance)
+
+##### Fixed *&sigma;* 
+```{r IR_check_NO_no_sigma, echo=FALSE}
+model.NO.no.modelled.sigma.IR <- gamlss(IR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
+                                        data=info.rate.data, family=NO(mu.link="identity"),
+                                        control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+
+plot(model.NO.no.modelled.sigma.IR)
+wp(model.NO.no.modelled.sigma.IR, ylim.all=0.4)
+cat("\nDeviance=",deviance(model.NO.no.modelled.sigma.IR,  what = "G"),"\n");
+cat("\nAIC=",AIC(model.NO.no.modelled.sigma.IR),"\n");
+```
+
+##### Modelled *&sigma;* 
+
+```{r IR_check_NO, echo=FALSE}
+model.NO.IR <- gamlss(IR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
+                      sigma.fo = ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
+                      data=info.rate.data, family=NO(mu.link="identity"), 
+                      control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+
+plot(model.NO.IR)
+wp(model.NO.IR, ylim.all=0.4)
+cat("\nDeviance=",deviance(model.NO.IR,  what = "G"),"\n");
+cat("\nAIC=",AIC(model.NO.IR),"\n");
+```
+
+Again, this is a better fit to the data.
+The full summary of the model is:
+
+```{r IR_summary, echo=FALSE}
+summary(model.NO.IR)
+```
+
+#### Random effects
+
+##### *&mu;*
+
+**Text**
+```{r IR_re_mu_text, echo=FALSE}
+getSmo(model.NO.IR, "mu", which = 1)
+```
+**Language**
+```{r IR_re_mu_lg, echo=FALSE}
+getSmo(model.NO.IR, "mu", which = 2)
+```
+**Speaker**
+```{r IR_re_mu_spk, echo=FALSE}
+getSmo(model.NO.IR, "mu", which = 3)
+``` 
+
+##### *&sigma;*
+
+**Text**
+```{r IR_re_sigma_text, echo=FALSE}
+getSmo(model.NO.IR, "sigma", which = 1)
+```
+**Language**
+```{r IR_re_sigma_lg, echo=FALSE}
+getSmo(model.NO.IR, "sigma", which = 2)
+```
+**Speaker**
+```{r IR_re_sigma_spk, echo=FALSE}
+getSmo(model.NO.IR, "sigma", which = 3)
+``` 
+
+
+## Modelling the relationship between SR and ID
+
+Let's model SR with ID as an additional predictor (fixed effect).
+*N.B.* In this case, we must drop Language as a random effect, since each language has, by definition, only one value of ID.
+
+```{r SR_ID_gamlss, echo=FALSE}
+model.NO.SR.ID <- gamlss(SR ~ 1 + ID + Sex + random(Text) + random(Speaker), 
+                         sigma.fo = ~ 1 + ID + Sex + random(Text) + random(Speaker), 
+                         data=info.rate.data, family=NO(mu.link="identity"), 
+                         control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+
+summary(model.NO.SR.ID)
+plot(model.NO.SR.ID)
+wp(model.NO.SR.ID, ylim.all=0.5)
+cat("\nDeviance=",deviance(model.NO.SR.ID,  what = "G"),"\n");
+cat("\nAIC=",AIC(model.NO.SR.ID),"\n");
+```
+
+Adding ID as a predictor improves the fits (as judged by AIC).
+There is a negative estimate for ID, but significance is difficult to assess with GAMLSS model involving smoothing functions.
+However, also using a simple lmer model we have a significant effect of ID:
+
+```{r SR_ID_lmer, echo=FALSE}
+lmer.SR.ID <- lmer(SR ~ 1 + ID + Sex + (1 | Text) + (1 | Speaker), data=info.rate.data)
+anova(lmer.SR.ID)
+```
+
+
+### Random effects
+
+#### *&mu;*
+
+**Text**
+```{r SR_ID_re_mu_text, echo=FALSE}
+getSmo(model.NO.SR.ID, "mu", which = 1)
+```
+**Speaker**
+```{r SR_ID_re_mu_spk, echo=FALSE}
+getSmo(model.NO.SR.ID, "mu", which = 2)
+``` 
+
+#### *&sigma;*
+
+**Text**
+```{r SR_ID_re_sigma_text, echo=FALSE}
+getSmo(model.NO.SR.ID, "sigma", which = 1)
+```
+**Speaker**
+```{r SR_ID_re_sigma_lg, echo=FALSE}
+getSmo(model.NO.SR.ID, "sigma", which = 2)
+```
+
+
+## Mixture of Gaussians
+
+In what follows, mixing probabilities are independent from factors such as Sex.
+
+### SR
+
+Between 1 and 5 Gaussian distributions:
+
+```{r SR_mixture, message = FALSE, echo=FALSE}
+mix.SR.NO.1 <- gamlssMX(SR ~ 1, family=NO, K=1, data=info.rate.data, plot=FALSE)
+mix.SR.NO.2 <- gamlssMX(SR ~ 1, family=NO, K=2, data=info.rate.data, plot=FALSE)
+mix.SR.NO.3 <- gamlssMX(SR ~ 1, family=NO, K=3, data=info.rate.data, plot=FALSE)
+mix.SR.NO.4 <- gamlssMX(SR ~ 1, family=NO, K=4, data=info.rate.data, plot=FALSE)
+mix.SR.NO.5 <- gamlssMX(SR ~ 1, family=NO, K=5, data=info.rate.data, plot=FALSE)
+```
+
+***1 component***
+```{r SR_components_1, echo=FALSE}
+mix.SR.NO.1
+```
+
+***2 components***
+```{r SR_components_2, echo=FALSE}
+mix.SR.NO.2
+```
+
+***3 components***
+```{r SR_components_3, echo=FALSE}
+mix.SR.NO.3
+```
+
+***4 components***
+```{r SR_components_4, echo=FALSE}
+mix.SR.NO.4
+```
+
+***5 components***
+```{r SR_components_5, echo=FALSE}
+mix.SR.NO.5
+```
+
+***Comparing AIC***
+
+```{r SR_mixture_AIC, echo=FALSE}
+AIC(mix.SR.NO.1, mix.SR.NO.2, mix.SR.NO.3, mix.SR.NO.4, mix.SR.NO.5)
+```
+
+***Showing the distributions***
+
+```{r SR_mixture_display, fig.width=6, fig.height=5, fig.cap="Mixture of Gaussians for SR.", echo=FALSE}
+fn.SR.NO.1 <- getpdfMX(mix.SR.NO.1, observation=1)
+fn.SR.NO.2 <- getpdfMX(mix.SR.NO.2, observation=1)
+fn.SR.NO.3 <- getpdfMX(mix.SR.NO.3, observation=1)
+fn.SR.NO.4 <- getpdfMX(mix.SR.NO.4, observation=1)
+fn.SR.NO.5 <- getpdfMX(mix.SR.NO.5, observation=1)
+
+truehist(info.rate.data$SR, nbins=25, col="skyblue", border="white", xlab="SR", ylab="Density", ymax=0.5)
+lines(seq(0,12,0.05),fn.SR.NO.1(seq(0,12,0.05)), lty=2, lwd=1, col="red")
+lines(seq(0,12,0.05),fn.SR.NO.4(seq(0,12,0.05)), lty=2, lwd=1, col="gray40")
+lines(seq(0,12,0.05),fn.SR.NO.5(seq(0,12,0.05)), lty=2, lwd=1, col="gray80")
+lines(seq(0,12,0.05),fn.SR.NO.3(seq(0,12,0.05)), lty=2, lwd=1, col="darkgreen")
+lines(seq(0,12,0.05),fn.SR.NO.2(seq(0,12,0.05)), lty=1, lwd=1, col="blue")
+legend("topleft", legend=c("K=1","K=2", "K=3", "K=4", "K=5"), lty=c(2,1,2,2,2), col=c("red", "blue", "darkgreen", "gray40", "gray80"), cex=1.0, title="# components");
+```
+
+### IR
+
+Between 1 and 5 Gaussian distributions:
+
+```{r IR_mixture, message = FALSE, echo=FALSE}
+mix.IR.NO.1 <- gamlssMX(IR ~ 1, family=NO, K=1, data=info.rate.data, plot=FALSE)
+mix.IR.NO.2 <- gamlssMX(IR ~ 1, family=NO, K=2, data=info.rate.data, plot=FALSE)
+mix.IR.NO.3 <- gamlssMX(IR ~ 1, family=NO, K=3, data=info.rate.data, plot=FALSE)
+mix.IR.NO.4 <- gamlssMX(IR ~ 1, family=NO, K=4, data=info.rate.data, plot=FALSE)
+mix.IR.NO.5 <- gamlssMX(IR ~ 1, family=NO, K=5, data=info.rate.data, plot=FALSE)
+```
+
+***1 component***
+```{r IR_components_1, echo=FALSE}
+mix.IR.NO.1
+```
+
+***2 components***
+```{r IR_components_2, echo=FALSE}
+mix.IR.NO.2
+```
+
+***3 components***
+```{r IR_components_3, echo=FALSE}
+mix.IR.NO.3
+```
+
+***4 components***
+```{r IR_components_4, echo=FALSE}
+mix.IR.NO.4
+```
+
+***5 components***
+```{r IR_components_5, echo=FALSE}
+mix.IR.NO.5
+```
+
+***Comparing AIC***
+
+```{r IR_mixture_AIC, echo=FALSE}
+AIC(mix.IR.NO.1, mix.IR.NO.2, mix.IR.NO.3, mix.IR.NO.4, mix.IR.NO.5)
+```
+
+***Showing the distributions***
+
+```{r IR_mixture_display, fig.width=6, fig.height=5, fig.cap="Mixture of Gaussians for IR.", echo=FALSE}
+fn.IR.NO.1 <- getpdfMX(mix.IR.NO.1, observation=1)
+fn.IR.NO.2 <- getpdfMX(mix.IR.NO.2, observation=1)
+fn.IR.NO.3 <- getpdfMX(mix.IR.NO.3, observation=1)
+fn.IR.NO.4 <- getpdfMX(mix.IR.NO.4, observation=1)
+fn.IR.NO.5 <- getpdfMX(mix.IR.NO.5, observation=1)
+
+truehist(info.rate.data$IR, nbins=25, col="skyblue", border="white", xlab="IR", ylab="Density", ymax=0.12)
+lines(seq(25,60,0.05),fn.IR.NO.1(seq(25,60,0.05)), lty=2, lwd=1, col="red")
+lines(seq(25,60,0.05),fn.IR.NO.4(seq(25,60,0.05)), lty=2, lwd=1, col="gray40")
+lines(seq(25,60,0.05),fn.IR.NO.5(seq(25,60,0.05)), lty=2, lwd=1, col="gray80")
+lines(seq(25,60,0.05),fn.IR.NO.3(seq(25,60,0.05)), lty=2, lwd=1, col="darkgreen")
+lines(seq(25,60,0.05),fn.IR.NO.2(seq(25,60,0.05)), lty=1, lwd=1, col="blue")
+legend("topleft", legend=c("K=1","K=2", "K=3", "K=4", "K=5"), lty=c(2,1,2,2,2), col=c("red", "blue", "darkgreen", "gray40", "gray80"), cex=1.0, title="# components");
+```
+
+
+## Tests of unimodality
+
+We used three ways to estimate how unimodal a distribution is, as they tend to disagree and the problem of unimodality testing is far from settled (see [Freeman & Dale, 2013](#references)):
+
+  - the **Silverman test** tests the null hypothesis that an underlying density has at most *k* modes. The null hypothesis is that the underlying density has at most *k* modes (H0: number of modes <= *k*). The result is the *p*-value (bootstrapped) of rejecting a unimodal distribution. It is described in [Silverman (1981)](#references) and [Hall & York (2001)](#references); our implementation is based on the code available at https://www.mathematik.uni-marburg.de/~stochastik/R_packages/;
+  - the **dip test** which computes Hartigans’ dip statistic *D_n_*, and its *p*-value for the test for unimodality, by interpolating tabulated quantiles of *sqrt(n) &bull; D_n_*. For *X_i_* ∼ *F*, i.i.d., the null hypothesis is that *F* is a unimodal distribution. The result is the *D* metric and the *p*-value (interpolated) of rejecting a unimodal distribution. See [Hartigan (1985)](#references) and [Hartigan & Hartigan (1985)](#references); it is implemented in package `diptest`;
+  - the **bimodality coefficient** (BC) which is based on an empirical relationship between bimodality and the third and fourth statistical moments of a distribution (skewness and kurtosis). It is proportional to the division of squared skewness with uncorrected kurtosis, *BC* &asymp;  (*s*^2^ + 1)/*k*, with the underlying logic that a bimodal distribution will have very low kurtosis, an asymmetric character, or both; all of these conditions increase *BC*. The values range from 0 and 1, with those exceeding .555 (the value representing a uniform distribution) suggesting bi-modality. The result is the *DC* estimate (which must exceed 0.555 to reject a unimodal distribution). We implemented it following [Freeman & Dale (2013)](#references) as *BC* =  (*s*^2^ + 1)/(*k* + 3 &bull; ((n-1)^2^ / ((n-2) &bull; (n-3)))).
+  
+For each such test, we performed four randomisation procedures to obtain an estimate of the "specialness" of the observed unimodality estimate; for each new permuted dataset, we recompute everything before estimating the unimodlaity of the permuted distribution:
+
+  - Permutation model 1 (**PM1**): randomly permute the SR values freely among speakers, texts and languages;
+  - Permutation model 2 (**PM2**): randomly permute the ID values among languages;
+  - Permutation model 3 (**PM3**): randomly permute the Speaker average SR values among speakers (irrespective of languages);
+  - Permutation model 4 (**PM4**): randomly permute the Language average SR values among languages.
+
+
+### Visual comparison
+
+The observed estimate (vertical blue solid line), the permuted distribution (gray histogram), and the "unimodality region" (shaded green rectangle) are shown below (for PM3, we also show the original estimate using the Speaker average SR as a vertical solid red line).
+
+```{r unimodality tests, echo=FALSE, message=FALSE, warning=FALSE}
+if( do.expensive.computations || !file.exists("./unimodality-tests-cached.RData") ) # computationally expensive: do it only if needed
+{
+  library(compiler);
+  library(parallel);
+  
+  #
+  # Silverman test
+  #
+  # from https://www.mathematik.uni-marburg.de/~stochastik/R_packages/
+  #
+  # The silvermantest tests the null hypothesis that an underlying density has at most k modes.
+  #    silverman.test(x, k, M = 999, adjust = FALSE, digits = 6)
+  # where:
+  #       x: vector of data
+  #       k: number of modes for the null hypothesis
+  #       M: number of bootstrap replications
+  #       adjust: boolean to activate the adjusting of the p-value (valid if k=1) (see Hall and York)
+  #       digits: number of digits of the p-value
+  #
+  # The null hypothesis of a silvermantest is that the underlying density has at most k modes (H0: number of modes <= k).  
+  # By rejecting this hypothesis (returned p-value is smaller than given level of significance) one can verify that the underlying density has more than k modes.  
+  # The test uses M bootstrap replications and calculates the frequency that the critical bandwidth of one bootstrap sample data set (h_crit) is greater than the critical bandwidth of the given data (h_0).
+  # This frequency is interesting,  because this event (hcrit of sample data > h_0) is equivalent to the event that the sample data has more than k modes. 
+  # The frequency is the returned p-value.
+  #
+  # Silverman, B.W. (1981). Using Kernel Density Estimates to investigate Multimodality.  Journal of the Royal Statistical Society, Series B, 43, 97-99.
+  # Hall, P. and York, M. (2001). On the calibration of Silverman’s test for multimodality.  Statistica Sinica, 11, 515-536.
+  #
+  library(splines);
+  silverman.test <- function(x, k, M=999, adjust=FALSE, digits=6)
+  {
+    # x: data
+    # k: number of modes to be tested
+    # M: number of bootstrap replications
+  
+    # auxiliary funtions:
+    h.crit <- function(x, k, prec=6)
+    {
+      #temp function
+      nor.kernel <- function(x,h)
+      {
+        density(x,bw=h,kernel ="gaussian")$y
+      }
+      
+      digits=prec
+      prec=10^(-prec)
+      x <- sort(x)
+      minh <- min(diff(x))		#minimal possible h
+      maxh <- diff(range(x))/2	#maximal possible h
+      a <- maxh
+      b <- minh
+      zaehler=0
+      
+      while (abs(b-a)>prec)
+      {
+        m <- nr.modes(nor.kernel(x,a))
+        
+        b <- a
+        if (m > k)
+        {
+          minh <- a
+          a <- (a + maxh)/2
+        } else 
+        {
+          maxh <- a
+          a <- (a - minh)/2
+        }
+      }
+      
+      a=round(a,digits)
+      
+      if(nr.modes( nor.kernel(x,a) ) <= k)
+      {
+        #subtract until more than k modes
+        while(nr.modes( nor.kernel(x,a) ) <= k)
+        {
+          a = a - prec
+        }
+        a=a+prec
+      }
+      
+      if(nr.modes( nor.kernel(x,a) ) > k)
+      {
+        #add until nr. of moodes correct
+        while(nr.modes( nor.kernel(x,a) ) > k)
+        {
+          a = a + prec
+        }
+      }
+      
+      a
+    }
+    
+    nr.modes <- function(y)
+    {
+      d1 <- diff(y)
+      signs <- diff(d1/abs(d1))
+      length(signs[signs==-2])
+    }
+    
+    
+    #check if seed is available (as done in boot package)
+    #if so save it
+    seedAvailable = exists(x=".Random.seed",envir=.GlobalEnv,inherits=FALSE)
+    if(seedAvailable)
+    {
+      saved_seed = .Random.seed 
+    } else
+    {
+      rnorm(1)
+      saved_seed = .Random.seed
+    }
+    
+    #temp function for bootstrapping
+    y.obs <- function(x,h,sig=sd(x))
+    {
+      mean(x) + (x-mean(x)+h*rnorm(length(x),0,1))/((1+h^2/sig^2)^(1/2))
+      #(x+h*rnorm(length(x),0,1))/((1+h^2/sig^2)^(1/2))
+    }
+    
+    #temp function for density calculation
+    nor.kernel <- function(x,h)
+    {
+      density(x,bw=h,kernel ="gaussian")$y
+    }
+    
+    #start of the test
+    h0 <- h.crit(x, k)
+    n <- 0
+    
+    for (i in 1:M)
+    {
+      x.boot <- sort(y.obs(sample(x, replace=TRUE),h0))
+      mod.temp <- nr.modes(nor.kernel(x.boot,h0))
+      if (mod.temp > k) n <- n+1
+    }
+    
+    p <- n/M
+    ptemp=p
+    
+    if(adjust==TRUE)
+    {
+      if(k==1)
+      {
+        #asymptotic levels of silvermantest by Hall/York
+        x=c(0,0.005,0.010,0.020,0.030,0.040,0.050,0.06,0.07,0.08,0.09,0.1,0.11,0.12,0.13,0.14,0.15,0.16,0.17,0.18,0.19,0.2,0.25,0.30,0.35,0.40,0.50)
+        y=c(0,0,0,0.002,0.004,0.006,0.010,0.012,0.016,0.021,0.025,0.032,0.038,0.043,0.050,0.057,0.062,0.07,0.079,0.088,0.094,0.102,0.149,0.202,0.252,0.308,0.423)
+        sp = interpSpline(x,y)
+        #adjusting the p-value
+        if(p<0.005)
+        {
+          p=0
+        } else
+        {
+          p = predict(sp,p)$y
+          p = round(p,digits)
+        }
+      }
+      else
+      {
+        print("The option to adjust the p-value is valid only for k=1")
+      } 
+    }
+    
+    test_obj = list("data"=x, "p.value"=max(0,p), "saved.seed"=saved_seed, "k"=k)
+    return(test_obj)
+  }
+  silverman.test <- cmpfun(silverman.test);
+  
+  
+  #
+  # The dip test
+  #
+  #    dip.test(x, simulate.p.value = FALSE, B = 2000)
+  # where:
+  #       x: numeric vector; sample to be tested for unimodality.
+  #       simulate.p.value: a logical indicating whether to compute p-values by Monte Carlo simulation.
+  #       B: an integer specifying the number of replicates used in the Monte Carlo test.
+  #
+  # Compute Hartigans’ dip statistic D_n, and its p-value for the test for unimodality, by interpolating tabulated quantiles of sqrt(n)*D_n.
+  # For X_i ∼ F, i.i.d., the null hypothesis is that F is a unimodal distribution.  
+  # Consequently, the test alternative is non-unimodal, i.e., at least bimodal. 
+  # Using the language of medical testing, you would call the test "Test for Multimodality”.
+  #
+  # P. M. Hartigan (1985) Computation of the Dip Statistic to Test for Unimodality. Applied Statistics (JRSS C) 34, 320–325. Corresponding (buggy!) Fortran code of 'AS 217' available from Statlib, http://lib.stat.cmu.edu/apstat/217
+  # J. A. Hartigan and P. M. Hartigan (1985) The Dip Test of Unimodality. Annals of Statistics 13, 70–84.
+  #
+  library(diptest);
+  
+  
+  #
+  # The BC test
+  #
+  #    BC.test(x)
+  # where:
+  #       x: numeric vector; sample to be tested for unimodality.
+  #
+  # The BC is based on an empirical relationship between bimodality and the third and fourth statistical moments of a distribution (skewness and kurtosis). 
+  # It is proportional to the division of squared skewness with uncorrected kurtosis, BC =  (s^2 + 1)/k, with the underlying logic that a bimodal distribution will have very low kurtosis, an asymmetric character, or both; all of these conditions increase BC. 
+  # The values range from 0 and 1, with those exceeding .555 (the value representing a uniform distribution) suggesting bi-modality (SAS Institute, 1989).
+  # Actually, Freeman & Dale (2013) implemented it as BC =  (s^2 + 1)/(k + 3*((n-1)^2 / ((n-2)*(n-3)))).
+  #
+  # Freeman, J. B., & Dale, R. (2013). Assessing bimodality to detect the presence of a dual cognitive process. Behavior research methods, 45(1), 83-97.
+  #
+  BC.test <- function(x)
+  {
+    n <- length(!is.na(x));
+    tmp <- (skewness(x, na.rm=TRUE)^2 + 1) / (kurtosis(x, na.rm=TRUE) + 3*((n-1)^2 / ((n-2)*(n-3))));
+    return (list("BC"=tmp, "is.bimodal"=(tmp > .555)));
+  }
+  
+  
+  diptest.qDiptab <- readRDS(system.file("extraData", "qDiptab.rds", package="diptest", mustWork=TRUE)); # cache the qDiptab used to compute the cut-off D value for dip.test (for plotting)
+  # Combine all these into a single function call:
+  test.unimodality <- function(x, aplha.level=0.05)
+  {
+    r1 <- silverman.test(x, k=1, adjust=TRUE, M=999);
+    r2 <- dip.test(x, simulate.p.value=FALSE, B=999);
+    r3 <- BC.test(x);
+    
+    # For the asymptotic dip.test, find the D value for a p-value of 0.05:
+    # Adapted from the code of dip.test():
+    x <- sort(x[complete.cases(x)]);
+    n <- length(x);
+    dn <- dimnames(diptest.qDiptab);
+    max.n <- max(nn <- as.integer(dn[["n"]]));
+    P.s <- as.numeric(dn[["Pr"]]);
+    if(n > max.n)
+    {
+      n1 <- n0 <- max.n;
+      i2 <- i.n <- length(nn);
+      f.n <- 0;
+    } else
+    {
+      n0 <- nn[i.n <- findInterval(n, nn)];
+      n1 <- nn[(i2 <- i.n + 1)];
+      f.n <- (n - n0)/(n1 - n0);
+    }
+    D0 <- diptest.qDiptab[i.n, "0.05"]; D1 <- diptest.qDiptab[i2, "0.05"]; 
+    D <- (D0 + (D1 - D0)*f.n);
+  
+    return (data.frame("silverman.p"=r1$p.value, "silverman.is.unimodal"=(r1$p.value >= aplha.level),
+                       "dip.D"=r2$statistic, "dip.p"=r2$p.value, "dip.is.unimodal"=(r2$p.value >= aplha.level), "dip.D.for.0.05"=D,
+                       "BC"=r3$BC, "BC.is.unimodal"=!r3$is.bimodal));
+  }
+  
+  # Number of permutations:
+  N_iter <- 1000;
+  
+  # Compute the unimodality for the actually observed SR and IR distributions:
+  unimod <- rbind(cbind("case"="original", "measure"="SR", test.unimodality(info.rate.data$SR)),
+                  cbind("case"="original", "measure"="IR", test.unimodality(info.rate.data$IR)));
+  
+  
+  # Permutation model 1
+  # Random permutation of Speakers SRs (= TEXT FLAT PERMUTATION):
+  # For k = 1 to N_iter
+  #   Get a random permutation SR_permuted of the speakers SR
+  #   Compute IR_permuted (CE_L x SR_permuted)
+  #   Compute Bimodality Coefficient (SR_permuted Distribution)
+  #   Compute Bimodality Coefficient (IR_permuted Distribution)
+  # end
+  tmp <- do.call(rbind, mclapply(1:N_iter, function(i)
+  {
+    df <- info.rate.data;
+    df$SR <- sample(df$SR);
+    df$IR <- (df$SR * df$ID);
+    rbind(cbind("case"=paste0("PM1 ",i), "measure"="SR", test.unimodality(df$SR)),
+          cbind("case"=paste0("PM1 ",i), "measure"="IR", test.unimodality(df$IR)));
+  }, mc.cores=4));
+  unimod <- rbind(unimod, tmp);
+  
+  
+  # Permutation model 2
+  # Random permutation of Languages' CE_L (= LANGUAGE-STRUCTURED PERMUTATION CE_L):
+  #  For k = 1 to N_iter
+  #   Get a random permutation CE_L_permuted of the languages' CE_L (N_L = 17)
+  #   Compute IR_permuted (CE_L_permuted x SR)
+  #   Compute Bimodality Coefficient (SR_permuted Distribution, N_S = 170)
+  #   Compute Bimodality Coefficient (IR_permuted Distribution, N_S = 170)
+  # end
+  x <- unique(info.rate.data[,c("Language", "ID")]);
+  df <- info.rate.data;
+  tmp <- do.call(rbind, mclapply(1:N_iter, function(i)
+  {
+    x$Language <- sample(x$Language);
+    df$IR <- vapply(1:nrow(df), function(i) (df$SR[i] * x$ID[ x$Language == df$Language[i] ]), numeric(1));
+    rbind(cbind("case"=paste0("PM2 ",i), "measure"="SR", test.unimodality(df$SR)),
+          cbind("case"=paste0("PM2 ",i), "measure"="IR", test.unimodality(df$IR)));
+  }, mc.cores=4));
+  unimod <- rbind(unimod, tmp);
+  
+  
+  # Permutation model 3
+  # Random permutation of Speakers' average SRs (= FLAT PERMUTATION):
+  # For k = 1 to N_iter
+  #   Get a random permutation SR_permuted of the speakers' average SR (N_S = 170)
+  #   Compute IR_permuted (CE_L x SR_permuted)
+  #   Compute Bimodality Coefficient (SR_permuted Distribution, N_S = 170)
+  #   Compute Bimodality Coefficient (IR_permuted Distribution, N_S = 170)
+  # end
+  spker.means <- ddply(info.rate.data, .(Speaker), function(x) c("SR.mean"=mean(x$SR,na.rm=TRUE), "IR.mean"=mean(x$IR,na.rm=TRUE)));
+  spker.means <- merge(spker.means, unique(info.rate.data[,c("Speaker", "Language", "ID")]), by="Speaker");
+  unimod <- rbind(unimod,
+                  cbind("case"="original means per speaker", "measure"="SR", test.unimodality(spker.means$SR.mean)),
+                  cbind("case"="original means per speaker", "measure"="IR", test.unimodality(spker.means$IR.mean)));
+  tmp <- do.call(rbind, mclapply(1:N_iter, function(i)
+  {
+    spker.means$SR.mean <- sample(spker.means$SR.mean);
+    spker.means$IR.mean <- spker.means$SR.mean * spker.means$ID;
+    rbind(cbind("case"=paste0("PM3 ",i), "measure"="SR", test.unimodality(spker.means$SR.mean)),
+          cbind("case"=paste0("PM3 ",i), "measure"="IR", test.unimodality(spker.means$IR.mean)));
+  }, mc.cores=4));
+  unimod <- rbind(unimod, tmp);
+  
+  
+  # Permutation model 4
+  # Random permutation of Languages' average SRs (= LANGUAGE-STRUCTURED PERMUTATION):
+  #  For k = 1 to N_iter
+  #   Get a random permutation SR_permuted of the languages' average SR (N_L = 17)
+  #   Compute SR Offset (= difference between original languages' average SR and permuted one)
+  #   For each language, shift each of its speaker' SR by this offset. This way, you keep the within-language distribution of speakers and shift the whole language distribution to the permuted average SR.
+  #   Compute IR_permuted (CE_L x SR_permuted)
+  #   Compute Bimodality Coefficient (SR_permuted Distribution, N_S = 170)
+  #   Compute Bimodality Coefficient (IR_permuted Distribution, N_S = 170)
+  # end
+  lgs.means <- ddply(info.rate.data, .(Language), function(x) c("SR.mean"=mean(x$SR,na.rm=TRUE), "IR.mean"=mean(x$IR,na.rm=TRUE)));
+  df <- info.rate.data;
+  tmp <- do.call(rbind, mclapply(1:N_iter, function(i)
+  {
+    lgs.means.perm.delta <- (lgs.means$SR.mean - sample(lgs.means$SR.mean)); names(lgs.means.perm.delta) <- lgs.means$Language;
+    df <- info.rate.data; 
+    df$SR <- (df$SR + lgs.means.perm.delta[as.character(df$Language)]);
+    df$IR <- (df$SR * df$ID);
+    rbind(cbind("case"=paste0("PM4 ",i), "measure"="SR", test.unimodality(df$SR)),
+          cbind("case"=paste0("PM4 ",i), "measure"="IR", test.unimodality(df$IR)));
+  }, mc.cores=4));
+  unimod <- rbind(unimod, tmp);
+  
+  save(unimod, file="./unimodality-tests-cached.RData", compress="xz");
+} else
+{
+  load("./unimodality-tests-cached.RData");
+}
+```
+
+#### PM1
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the texts' SRs (PM1)**."}
+results <- NULL; # collect results for pretty printing
+
+# Plotting:
+par(mfrow=c(3,2));
+alpha.level = 0.05;
+s <- unimod[ c(which(unimod$case %in% c("original")), grep("PM1", unimod$case, fixed=TRUE)), ]; # select the flat permutations
+
+# Silverman SR:
+hist(s$silverman.p[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$silverman.p[ s$measure == "SR" ],alpha.level*2)),
+     main="Silverman test for SR", xlab="p-value"); 
+abline(v=s$silverman.p[ s$measure == "SR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+rect(alpha.level, par("usr")[3], par("usr")[2], par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM1", "test"="Silverman", "measure"="SR", 
+                                     "original"=NA,
+                                     "original.p"=s$silverman.p[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$silverman.is.unimodal[ s$measure == "SR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$silverman.p[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$silverman.p[ s$measure == "SR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# Silvermans IR:
+hist(s$silverman.p[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$silverman.p[ s$measure == "IR" ],alpha.level*2)),
+     main="Silverman test for IR", xlab="p-value"); 
+abline(v=s$silverman.p[ s$measure == "IR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+rect(alpha.level, par("usr")[3], par("usr")[2], par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM1", "test"="Silverman", "measure"="IR", 
+                                     "original"=NA,
+                                     "original.p"=s$silverman.p[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$silverman.is.unimodal[ s$measure == "IR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$silverman.p[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$silverman.p[ s$measure == "IR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# Dip SR:
+hist(s$dip.D[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$dip.D[ s$measure == "SR" ], 0)),
+     main="Dip test for SR", xlab="D"); 
+abline(v=s$dip.D[ s$measure == "SR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+#tmp <- s$dip.D[ s$measure == "SR" & s$dip.is.unimodal ];
+tmp <- s$dip.D.for.0.05[ s$measure == "SR" ];
+rect(par("usr")[1], par("usr")[3], max(tmp,na.rm=TRUE), par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM1", "test"="Dip", "measure"="SR", 
+                                     "original"=s$dip.D[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.p"=s$dip.p[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$dip.is.unimodal[ s$measure == "SR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$dip.p[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$dip.p[ s$measure == "SR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# Dip IR:
+hist(s$dip.D[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$dip.D[ s$measure == "IR" ], 0)),
+     main="Dip test for IR", xlab="D"); 
+abline(v=s$dip.D[ s$measure == "IR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+#tmp <- s$dip.D[ s$measure == "IR" & s$dip.is.unimodal ];
+tmp <- s$dip.D.for.0.05[ s$measure == "IR" ];
+rect(par("usr")[1], par("usr")[3], max(tmp,na.rm=TRUE), par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM1", "test"="Dip", "measure"="IR", 
+                                     "original"=s$dip.D[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.p"=s$dip.p[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$dip.is.unimodal[ s$measure == "IR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$dip.p[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$dip.p[ s$measure == "IR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# BC SR:
+hist(s$BC[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$BC[ s$measure == "SR" ], 0.555+0.010)),
+     main="BC test for SR", xlab="BC"); 
+abline(v=s$BC[ s$measure == "SR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+tmp <- s$BC[ s$measure == "SR" & s$BC.is.unimodal ];
+rect(par("usr")[1], par("usr")[3], 0.555, par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM1", "test"="BC", "measure"="SR", 
+                                     "original"=s$BC[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.p"=NA,
+                                     "original.is.unimodal"=s$BC.is.unimodal[ s$measure == "SR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$BC[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$BC[ s$measure == "SR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# BC IR:
+hist(s$BC[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$BC[ s$measure == "IR" ], 0.555+0.010)),
+     main="BC test for IR", xlab="BC"); 
+abline(v=s$BC[ s$measure == "IR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+tmp <- s$BC[ s$measure == "IR" & s$BC.is.unimodal ];
+rect(par("usr")[1], par("usr")[3], 0.555, par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM1", "test"="BC", "measure"="IR", 
+                                     "original"=s$BC[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.p"=NA,
+                                     "original.is.unimodal"=s$BC.is.unimodal[ s$measure == "IR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$BC[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$BC[ s$measure == "IR" & (s$case == "original") ], na.rm=TRUE)/1000));
+```
+
+#### PM2
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the languages' ID (PM2)**."}
+# Plotting:
+par(mfrow=c(3,2));
+alpha.level = 0.05;
+s <- unimod[ c(which(unimod$case %in% c("original")), grep("PM2", unimod$case, fixed=TRUE)), ]; # select the flat permutations
+
+# Silverman SR:
+hist(s$silverman.p[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$silverman.p[ s$measure == "SR" ],alpha.level*2)),
+     main="Silverman test for SR", xlab="p-value"); 
+abline(v=s$silverman.p[ s$measure == "SR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+rect(alpha.level, par("usr")[3], par("usr")[2], par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM2", "test"="Silverman", "measure"="SR", 
+                                     "original"=NA,
+                                     "original.p"=s$silverman.p[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$silverman.is.unimodal[ s$measure == "SR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$silverman.p[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$silverman.p[ s$measure == "SR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# Silvermans IR:
+hist(s$silverman.p[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$silverman.p[ s$measure == "IR" ],alpha.level*2)),
+     main="Silverman test for IR", xlab="p-value"); 
+abline(v=s$silverman.p[ s$measure == "IR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+rect(alpha.level, par("usr")[3], par("usr")[2], par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM2", "test"="Silverman", "measure"="IR", 
+                                     "original"=NA,
+                                     "original.p"=s$silverman.p[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$silverman.is.unimodal[ s$measure == "IR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$silverman.p[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$silverman.p[ s$measure == "IR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# Dip SR:
+hist(s$dip.D[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$dip.D[ s$measure == "SR" ], 0)),
+     main="Dip test for SR", xlab="D"); 
+abline(v=s$dip.D[ s$measure == "SR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+#tmp <- s$dip.D[ s$measure == "SR" & s$dip.is.unimodal ];
+tmp <- s$dip.D.for.0.05[ s$measure == "SR" ];
+rect(par("usr")[1], par("usr")[3], max(tmp,na.rm=TRUE), par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM2", "test"="Dip", "measure"="SR", 
+                                     "original"=s$dip.D[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.p"=s$dip.p[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$dip.is.unimodal[ s$measure == "SR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$dip.p[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$dip.p[ s$measure == "SR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# Dip IR:
+hist(s$dip.D[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$dip.D[ s$measure == "IR" ], 0)),
+     main="Dip test for IR", xlab="D"); 
+abline(v=s$dip.D[ s$measure == "IR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+#tmp <- s$dip.D[ s$measure == "IR" & s$dip.is.unimodal ];
+tmp <- s$dip.D.for.0.05[ s$measure == "IR" ];
+rect(par("usr")[1], par("usr")[3], max(tmp,na.rm=TRUE), par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM2", "test"="Dip", "measure"="IR", 
+                                     "original"=s$dip.D[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.p"=s$dip.p[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$dip.is.unimodal[ s$measure == "IR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$dip.p[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$dip.p[ s$measure == "IR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# BC SR:
+hist(s$BC[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$BC[ s$measure == "SR" ], 0.555+0.010)),
+     main="BC test for SR", xlab="BC"); 
+abline(v=s$BC[ s$measure == "SR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+tmp <- s$BC[ s$measure == "SR" & s$BC.is.unimodal ];
+rect(par("usr")[1], par("usr")[3], 0.555, par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM2", "test"="BC", "measure"="SR", 
+                                     "original"=s$BC[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.p"=NA,
+                                     "original.is.unimodal"=s$BC.is.unimodal[ s$measure == "SR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$BC[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$BC[ s$measure == "SR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# BC IR:
+hist(s$BC[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$BC[ s$measure == "IR" ], 0.555+0.010)),
+     main="BC test for IR", xlab="BC"); 
+abline(v=s$BC[ s$measure == "IR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+tmp <- s$BC[ s$measure == "IR" & s$BC.is.unimodal ];
+rect(par("usr")[1], par("usr")[3], 0.555, par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM2", "test"="BC", "measure"="IR", 
+                                     "original"=s$BC[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.p"=NA,
+                                     "original.is.unimodal"=s$BC.is.unimodal[ s$measure == "IR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$BC[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$BC[ s$measure == "IR" & (s$case == "original") ], na.rm=TRUE)/1000));
+```
+
+#### PM3
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the speakers' average SRs (PM3)**."}
+# Plotting:
+par(mfrow=c(3,2));
+alpha.level = 0.05;
+s <- unimod[ c(which(unimod$case %in% c("original","original means per speaker")), grep("PM3", unimod$case, fixed=TRUE)), ]; # select the flat permutations
+
+# Silverman SR:
+hist(s$silverman.p[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$silverman.p[ s$measure == "SR" ],alpha.level*2)),
+     main="Silverman test for SR", xlab="p-value"); 
+abline(v=s$silverman.p[ s$measure == "SR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+abline(v=s$silverman.p[ s$measure == "SR" & (s$case == "original means per speaker") ], col="red", lwd=2, lty="solid");
+rect(alpha.level, par("usr")[3], par("usr")[2], par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM3", "test"="Silverman", "measure"="SR", 
+                                     "original"=NA,
+                                     "original.p"=s$silverman.p[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$silverman.is.unimodal[ s$measure == "SR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$silverman.p[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$silverman.p[ s$measure == "SR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# Silvermans IR:
+hist(s$silverman.p[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$silverman.p[ s$measure == "IR" ],alpha.level*2)),
+     main="Silverman test for IR", xlab="p-value"); 
+abline(v=s$silverman.p[ s$measure == "IR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+abline(v=s$silverman.p[ s$measure == "IR" & (s$case == "original means per speaker") ], col="red", lwd=2, lty="solid");
+rect(alpha.level, par("usr")[3], par("usr")[2], par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM3", "test"="Silverman", "measure"="IR", 
+                                     "original"=NA,
+                                     "original.p"=s$silverman.p[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$silverman.is.unimodal[ s$measure == "IR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$silverman.p[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$silverman.p[ s$measure == "IR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# Dip SR:
+hist(s$dip.D[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$dip.D[ s$measure == "SR" ], 0)),
+     main="Dip test for SR", xlab="D"); 
+abline(v=s$dip.D[ s$measure == "SR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+abline(v=s$dip.D[ s$measure == "SR" & (s$case == "original means per speaker") ], col="red", lwd=2, lty="solid");
+#tmp <- s$dip.D[ s$measure == "SR" & s$dip.is.unimodal ];
+tmp <- s$dip.D.for.0.05[ s$measure == "SR" ];
+rect(par("usr")[1], par("usr")[3], max(tmp,na.rm=TRUE), par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM3", "test"="Dip", "measure"="SR", 
+                                     "original"=s$dip.D[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.p"=s$dip.p[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$dip.is.unimodal[ s$measure == "SR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$dip.p[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$dip.p[ s$measure == "SR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# Dip IR:
+hist(s$dip.D[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$dip.D[ s$measure == "IR" ], 0)),
+     main="Dip test for IR", xlab="D"); 
+abline(v=s$dip.D[ s$measure == "IR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+abline(v=s$dip.D[ s$measure == "IR" & (s$case == "original means per speaker") ], col="red", lwd=2, lty="solid");
+#tmp <- s$dip.D[ s$measure == "IR" & s$dip.is.unimodal ];
+tmp <- s$dip.D.for.0.05[ s$measure == "IR" ];
+rect(par("usr")[1], par("usr")[3], max(tmp,na.rm=TRUE), par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM3", "test"="Dip", "measure"="IR", 
+                                     "original"=s$dip.D[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.p"=s$dip.p[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$dip.is.unimodal[ s$measure == "IR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$dip.p[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$dip.p[ s$measure == "IR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# BC SR:
+hist(s$BC[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$BC[ s$measure == "SR" ], 0.555+0.010)),
+     main="BC test for SR", xlab="BC"); 
+abline(v=s$BC[ s$measure == "SR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+abline(v=s$BC[ s$measure == "SR" & (s$case == "original means per speaker") ], col="red", lwd=2, lty="solid");
+tmp <- s$BC[ s$measure == "SR" & s$BC.is.unimodal ];
+rect(par("usr")[1], par("usr")[3], 0.555, par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM3", "test"="BC", "measure"="SR", 
+                                     "original"=s$BC[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.p"=NA,
+                                     "original.is.unimodal"=s$BC.is.unimodal[ s$measure == "SR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$BC[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$BC[ s$measure == "SR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# BC IR:
+hist(s$BC[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ], 
+     col=gray(0.8), xlim=range(c(s$BC[ s$measure == "IR" ], 0.555+0.010)),
+     main="BC test for IR", xlab="BC"); 
+abline(v=s$BC[ s$measure == "IR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+abline(v=s$BC[ s$measure == "IR" & (s$case == "original means per speaker") ], col="red", lwd=2, lty="solid");
+tmp <- s$BC[ s$measure == "IR" & s$BC.is.unimodal ];
+rect(par("usr")[1], par("usr")[3], 0.555, par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM3", "test"="BC", "measure"="IR", 
+                                     "original"=s$BC[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.p"=NA,
+                                     "original.is.unimodal"=s$BC.is.unimodal[ s$measure == "IR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$BC[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$BC[ s$measure == "IR" & (s$case == "original") ], na.rm=TRUE)/1000));
+```
+
+#### PM4
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the languages' average SRs with speaker adjustement (PM4)**."}
+# Plotting:
+par(mfrow=c(3,2));
+alpha.level = 0.05;
+s <- unimod[ c(which(unimod$case %in% c("original")), grep("PM4", unimod$case, fixed=TRUE)), ]; # select the flat permutations
+
+# Silverman SR:
+hist(s$silverman.p[ s$measure == "SR" & !(s$case %in% c("original")) ], 
+     col=gray(0.8), xlim=range(c(s$silverman.p[ s$measure == "SR" ],alpha.level*2)),
+     main="Silverman test for SR", xlab="p-value"); 
+abline(v=s$silverman.p[ s$measure == "SR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+rect(alpha.level, par("usr")[3], par("usr")[2], par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM4", "test"="Silverman", "measure"="SR", 
+                                     "original"=NA,
+                                     "original.p"=s$silverman.p[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$silverman.is.unimodal[ s$measure == "SR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$silverman.p[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$silverman.p[ s$measure == "SR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# Silvermans IR:
+hist(s$silverman.p[ s$measure == "IR" & !(s$case %in% c("original")) ], 
+     col=gray(0.8), xlim=range(c(s$silverman.p[ s$measure == "IR" ],alpha.level*2)),
+     main="Silverman test for IR", xlab="p-value"); 
+abline(v=s$silverman.p[ s$measure == "IR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+rect(alpha.level, par("usr")[3], par("usr")[2], par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM4", "test"="Silverman", "measure"="IR", 
+                                     "original"=NA,
+                                     "original.p"=s$silverman.p[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$silverman.is.unimodal[ s$measure == "IR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$silverman.p[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$silverman.p[ s$measure == "IR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# Dip SR:
+hist(s$dip.D[ s$measure == "SR" & !(s$case %in% c("original")) ], 
+     col=gray(0.8), xlim=range(c(s$dip.D[ s$measure == "SR" ], 0)),
+     main="Dip test for SR", xlab="D"); 
+abline(v=s$dip.D[ s$measure == "SR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+#tmp <- s$dip.D[ s$measure == "SR" & s$dip.is.unimodal ];
+tmp <- s$dip.D.for.0.05[ s$measure == "SR" ];
+rect(par("usr")[1], par("usr")[3], max(tmp,na.rm=TRUE), par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM4", "test"="Dip", "measure"="SR", 
+                                     "original"=s$dip.D[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.p"=s$dip.p[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$dip.is.unimodal[ s$measure == "SR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$dip.p[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$dip.p[ s$measure == "SR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# Dip IR:
+hist(s$dip.D[ s$measure == "IR" & !(s$case %in% c("original")) ], 
+     col=gray(0.8), xlim=range(c(s$dip.D[ s$measure == "IR" ], 0)),
+     main="Dip test for IR", xlab="D"); 
+abline(v=s$dip.D[ s$measure == "IR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+#tmp <- s$dip.D[ s$measure == "IR" & s$dip.is.unimodal ];
+tmp <- s$dip.D.for.0.05[ s$measure == "IR" ];
+rect(par("usr")[1], par("usr")[3], max(tmp,na.rm=TRUE), par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM4", "test"="Dip", "measure"="IR", 
+                                     "original"=s$dip.D[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.p"=s$dip.p[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.is.unimodal"=s$dip.is.unimodal[ s$measure == "IR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$dip.p[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$dip.p[ s$measure == "IR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# BC SR:
+hist(s$BC[ s$measure == "SR" & !(s$case %in% c("original")) ], 
+     col=gray(0.8), xlim=range(c(s$BC[ s$measure == "SR" ], 0.555+0.010)),
+     main="BC test for SR", xlab="BC"); 
+abline(v=s$BC[ s$measure == "SR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+tmp <- s$BC[ s$measure == "SR" & s$BC.is.unimodal ];
+rect(par("usr")[1], par("usr")[3], 0.555, par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM4", "test"="BC", "measure"="SR", 
+                                     "original"=s$BC[ s$measure == "SR" & (s$case == "original") ],
+                                     "original.p"=NA,
+                                     "original.is.unimodal"=s$BC.is.unimodal[ s$measure == "SR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$BC[ s$measure == "SR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$BC[ s$measure == "SR" & (s$case == "original") ], na.rm=TRUE)/1000));
+
+# BC IR:
+hist(s$BC[ s$measure == "IR" & !(s$case %in% c("original")) ], 
+     col=gray(0.8), xlim=range(c(s$BC[ s$measure == "IR" ], 0.555+0.010)),
+     main="BC test for IR", xlab="BC"); 
+abline(v=s$BC[ s$measure == "IR" & (s$case == "original") ], col="blue", lwd=2, lty="solid");
+tmp <- s$BC[ s$measure == "IR" & s$BC.is.unimodal ];
+rect(par("usr")[1], par("usr")[3], 0.555, par("usr")[4], density=25, col=alpha("green",alpha=0.2), border="green");
+results <- rbind(results, data.frame("scenario"="PM4", "test"="BC", "measure"="IR", 
+                                     "original"=s$BC[ s$measure == "IR" & (s$case == "original") ],
+                                     "original.p"=NA,
+                                     "original.is.unimodal"=s$BC.is.unimodal[ s$measure == "IR" & (s$case == "original") ],
+                                     "permuted.better"=sum(s$BC[ s$measure == "IR" & !(s$case %in% c("original", "original means per speaker")) ] >= s$BC[ s$measure == "IR" & (s$case == "original") ], na.rm=TRUE)/1000));
+```
+
+#### Summary of unimodality tests
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Print these results as a table:
+results <- results[ order(results$scenario, results$measure, results$test), ];
+results <- cbind(results[,c("scenario","measure","test")], 
+                 "original"=paste0(ifelse(!is.na(results$original),round(results$original,3),"-"), 
+                                   " (", ifelse(!is.na(results$original.p),round(results$original.p,3),""), ") ", 
+                                   ifelse(results$original.is.unimodal,"*","")),
+                 "permuted.better"=paste0(round(results$permuted.better*100,1),"%"));
+
+knitr::kable(results, digits=3, row.names=FALSE, 
+             col.names=c("Scenario", "Measure", "Test", "Observed estimate (*p*-value)", "% more unimodal permutations"),
+             caption="Summary of unimodality permutation tests.");
+```
+
+
+## Pair-wise distances between languages
+
+We compute various distances between languages (as implemented by function `distance()` in package `philentropy`) in what concerns the distribution of NS, SR and ID.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=6, fig.cap="Comparing the distribution of pairwise distances between languages."}
+# Compute all sorts of distances between all paris of grouping.var values for the values of measured.var:
+.compute.pariwise.distances.for.variable <- function(grouping.var, # the grouping variable from which the pairs are formed
+                                                     measured.var  # the measured variable which provides the observed values
+)
+{
+  require(philentropy);
+  
+  # Checks:
+  if( is.null(grouping.var) || is.null(measured.var) || 
+      length(grouping.var) != length(measured.var) || 
+      anyNA(grouping.var) || anyNA(measured.var) )
+  {
+    warning("Cannot compute pairwise distances for variables that are NULL, contain NAs or have different lengths\n");
+    return (NULL);
+  }
+  if( is.factor(grouping.var) ) grouping.var <- as.character(grouping.var);
+  
+  # Get the best histogram breaks for the whole of measured.var:
+  h.all <- hist(measured.var, plot=FALSE)$breaks;
+  
+  # All ordered pairs of grouping.var values:
+  grouping.var.pairs <- expand.grid("v1"=unique(grouping.var), "v2"=unique(grouping.var), stringsAsFactors=FALSE);
+  grouping.var.pairs <- grouping.var.pairs[ grouping.var.pairs$v1 < grouping.var.pairs$v2, ];
+  grouping.var.pairs <- grouping.var.pairs[ order(grouping.var.pairs$v1, grouping.var.pairs$v2), ];
+  
+  # For each such pair, compute the distances:
+  d <- do.call(rbind,lapply(1:nrow(grouping.var.pairs), function(i)
+  {
+    # Select the corresponding measured variable values:
+    s1 <- (grouping.var == grouping.var.pairs$v1[i]); s2 <- (grouping.var == grouping.var.pairs$v2[i]); 
+    if( sum(s1) == 0 || sum(s2) == 0 ) return (c("Kolmogorov–Smirnov"=NA,
+                                                 "Kullback-Leibler"  =NA,
+                                                 "Jensen-Shannon"    =NA,
+                                                 "Hellinger"         =NA,
+                                                 "Squared-Chi"       =NA));
+    
+    # The histograms of the values:
+    h1 <- hist(measured.var[s1], breaks=h.all, plot=FALSE);
+    h2 <- hist(measured.var[s2], breaks=h.all, plot=FALSE);
+    x1 <- h1$counts; x2 <- h2$counts;
+    x1[x1==0] <- 1.0e-20; x2[x2==0] <- 1.0e-20; # remove zeros
+    x1 <- x1 / sum(x1); x2 <- x2 / sum(x2);
+    h12 <- rbind(x1,x2); # as matrix (required by philentropy::distance())
+    
+    c("Kolmogorov–Smirnov"=as.numeric(suppressWarnings(ks.test(measured.var[s1], measured.var[s2])$statistic)),
+      "Kullback-Leibler"  =as.numeric(philentropy::distance(h12, method="kullback-leibler")),
+      "Jensen-Shannon"    =as.numeric(philentropy::distance(h12, method="jensen-shannon")),
+      "Hellinger"         =as.numeric(philentropy::distance(h12, method="hellinger")),
+      "Squared-Chi"       =as.numeric(philentropy::distance(h12, method="squared_chi")));
+  }));
+  grouping.var.pairs <- cbind(grouping.var.pairs, d);
+  return (grouping.var.pairs);
+}
+
+# Pairwise language distances for various variables:  
+pairwise.dists <- do.call(rbind, lapply(c("NS", "SR", "IR"), function(s)
+{
+  tmp <- .compute.pariwise.distances.for.variable(info.rate.data$Language, info.rate.data[,s])
+  return (cbind("Measure"=s, tmp)); 
+}));
+names(pairwise.dists)[1+(1:2)] <- paste0("Language",1:2);
+pairwise.dists <- merge(pairwise.dists, unique(info.rate.data[,c("Language", "Family")]), by.x="Language1", by.y="Language", all.x=TRUE); names(pairwise.dists)[ncol(pairwise.dists)] <- "LgFam1";
+pairwise.dists <- merge(pairwise.dists, unique(info.rate.data[,c("Language", "Family")]), by.x="Language2", by.y="Language", all.x=TRUE); names(pairwise.dists)[ncol(pairwise.dists)] <- "LgFam2";
+pairwise.dists <- pairwise.dists[,c("Language1", "Language2", "LgFam1", "LgFam2", "Measure", "Kolmogorov–Smirnov", "Kullback-Leibler", "Jensen-Shannon", "Hellinger", "Squared-Chi")];
+pairwise.dists <- pairwise.dists[ order(pairwise.dists$Language1, pairwise.dists$Language2, pairwise.dists$Measure), ];
+
+# Long format (for plotting):
+pairwise.dists.long <- melt(pairwise.dists, measure.vars=c("Kolmogorov–Smirnov", "Kullback-Leibler", "Jensen-Shannon", "Hellinger", "Squared-Chi"), variable.name="Method", value.name="Distance");
+
+# Plots:
+d <- pairwise.dists.long;
+multiplot(plotlist=list(
+  ggplot(d[d$Method=="Kolmogorov–Smirnov",], aes(x=Measure, y=Distance, color=Measure, fill=Measure)) + geom_boxplot(alpha=0.3) + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position="none", axis.title.x=element_blank(), axis.title.y=element_blank()) + ggtitle("K-S"),
+  ggplot(d[d$Method=="Kullback-Leibler",], aes(x=Measure, y=Distance, color=Measure, fill=Measure)) + geom_boxplot(alpha=0.3) + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position="none", axis.title.x=element_blank(), axis.title.y=element_blank()) + ggtitle("K-L"),
+  ggplot(d[d$Method=="Jensen-Shannon",], aes(x=Measure, y=Distance, color=Measure, fill=Measure)) + geom_boxplot(alpha=0.3) + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position="none", axis.title.x=element_blank(), axis.title.y=element_blank()) + ggtitle("J-S"),
+  ggplot(d[d$Method=="Hellinger",], aes(x=Measure, y=Distance, color=Measure, fill=Measure)) + geom_boxplot(alpha=0.3) + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position="none", axis.title.x=element_blank(), axis.title.y=element_blank()) + ggtitle("H"),
+  ggplot(d[d$Method=="Squared-Chi",], aes(x=Measure, y=Distance, color=Measure, fill=Measure)) + geom_boxplot(alpha=0.3) + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position="none", axis.title.x=element_blank(), axis.title.y=element_blank()) + ggtitle("Chi2")),
+          cols=5)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Permutations t-tests:
+library(broman);
+pairs.of.measures.t.tests <- expand.grid("m1"=as.character(unique(pairwise.dists.long$Measure)), "m2"=as.character(unique(pairwise.dists.long$Measure)), "d"=as.character(unique(pairwise.dists.long$Method)), stringsAsFactors=FALSE);
+pairs.of.measures.t.tests <- pairs.of.measures.t.tests[ pairs.of.measures.t.tests$m1 < pairs.of.measures.t.tests$m2, ];
+pairs.of.measures.t.tests <- pairs.of.measures.t.tests[ order(pairs.of.measures.t.tests$m1, pairs.of.measures.t.tests$m2, pairs.of.measures.t.tests$d), ];
+
+pairs.of.measures.t.tests <- cbind(pairs.of.measures.t.tests, 
+                                   do.call(rbind,lapply(1:nrow(pairs.of.measures.t.tests), function(i)
+{
+  s1 <- (as.character(pairwise.dists.long$Measure) == as.character(pairs.of.measures.t.tests$m1[i]) & 
+           as.character(pairwise.dists.long$Method) == as.character(pairs.of.measures.t.tests$d[i]));
+  s2 <- (as.character(pairwise.dists.long$Measure) == as.character(pairs.of.measures.t.tests$m2[i]) & 
+           as.character(pairwise.dists.long$Method) == as.character(pairs.of.measures.t.tests$d[i]));
+  return (c("mean1"=mean(pairwise.dists.long$Distance[s1]), "median1"=median(pairwise.dists.long$Distance[s1]), "sd1"=sd(pairwise.dists.long$Distance[s1]), 
+            "mean2"=mean(pairwise.dists.long$Distance[s2]), "median2"=median(pairwise.dists.long$Distance[s2]), "sd2"=sd(pairwise.dists.long$Distance[s2]),
+            "p"=paired.perm.test(pairwise.dists.long$Distance[s1]  - pairwise.dists.long$Distance[s2], n.perm=1000)));
+})));
+knitr::kable(pairs.of.measures.t.tests, row.names=FALSE, digits=2,
+             caption="Paired permutation t-tests comparing measures with 1,000 permutations.");
+```
+
+
+## References
+
+Campione, E., & Véronis, J. (1998). A multilingual prosodic database, *Proc. of the 5th International Conference on Spoken Language Pro cessing (ICSLP’98), Sydney, Australia*, 3163-3166.
+
+Freeman, J. B., & Dale, R. (2013). Assessing bimodality to detect the presence of a dual cognitive process. *Behavior research methods*, **45**(1), 83-97.
+
+Hall, P., & York, M. (2001). On the calibration of Silverman’s test for multimodality. *Statistica Sinica*, **11**, 515-536.
+
+Hartigan, J. A., & Hartigan, P. M.  (1985) The Dip Test of Unimodality. *Annals of Statistics* **13**, 70–84.
+
+Hartigan, P. M. (1985) Computation of the Dip Statistic to Test for Unimodality. *Applied Statistics (JRSS C)* **34**, 320–325.
+
+Le, V. B., Tran, D. D., Castelli, E., Besacier, L., & Serignat, J. F. (2004). Spoken and Written Language Resources for Vietnamese. In *LREC. 4*, pp. 599-602.
+
+Lyding, V., Stemle, E., Borghetti, C., Brunello, M., Castagnoli, S., Dell’Orletta, F., Dittmann, H., Lenci, A., & Pirrelli, V. (2014). The PAISÀ Corpus of Italian Web Texts. In *Proceedings of the 9th Web as Corpus Workshop (WaC-9). Association for Computational Linguistics, Gothenburg, Sweden*, 36-43.
+
+New B., Pallier C., Ferrand L., & Matos R. (2001). Une base de données lexicales du français contemporain sur internet: LEXIQUE 3.80, *L’Année Psychologique*, **101**, 447-462. http://www.lexique.org.
+
+Oh, Y. M. (2015). *Linguistic complexity and information: quantitative approaches*. PhD Thesis, Université de Lyon, France. Retrieved from http://www.afcp-parole.org/doc/theses/these_YMO15.pdf
+
+Perea, M., Urkia, M., Davis, C. J., Agirre, A., Laseka, E., & Carreiras, M. (2006). E-Hitz: A word frequency list and a program for deriving psycholinguistic statistics in an agglutinative language (Basque). *Behavior Research Methods*, **38(4)**, 610-615.
+
+Sharoff, S. (2006). Creating general-purpose corpora using automated search engine queries. In Baroni, M. and Bernardini, S. (Eds.) *WaCky! Working papers on the web as corpus, Gedit, Bologna*, http://corpus.leeds.ac.uk/queryzh.html.
+
+Silverman, B.W. (1981). Using Kernel Density Estimates to investigate Multimodality. *Journal of the Royal Statistical Society, Series B*, **43**, 97-99.
+
+Váradi, T. (2002). The Hungarian National Corpus. In *LREC*.
+
+Zséder, A., Recski, G., Varga, D., & Kornai, A. (2012). Rapid creation of large-scale corpora and frequency dictionaries. In *Proceedings to LREC 2012*.
+
+
+## Appendix I: `R` session info
+
+This document was compiled on:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+pander(sessionInfo(), compact=TRUE);
+```
+
+
+## Appendix II: Figures for the main paper
+
+Here we generate the figures used in the main paper (saved to the `./figures` folder as 600 DPI TIFF files `Figure-*.tiff`).
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+tiff("./figures/Figure-SR-IR-distribs.tiff", width=8, height=5, units="in", compression="lzw", res=600, type="cairo");
+tmp <- melt(info.rate.data, id.vars=c("Language", "Text", "Speaker", "Family"), measure.vars=c("SR", "IR"));
+ggplot(tmp, aes(value, fill = Language, colour = Language)) + geom_density(alpha = 0.1) + 
+  facet_wrap("variable", scales="free") + geom_density(aes(value), data=tmp, fill=NA, color="black") + theme(legend.position="bottom");
+dev.off();
+
+require("ggrepel");
+tiff("./figures/Figure-SR-vs-ID.tiff", width=6, height=7, units="in", compression="lzw", res=600, type="cairo");
+ggplot(info.rate.data, aes(y=SR, x=ID, color=Family)) + ylim(range(info.rate.data$SR)+c(0.0,0.5)) + 
+  geom_point(alpha=0.5, size=1) + 
+  geom_smooth(aes(y=SR, x=ID), method="lm", color="yellow") +
+  geom_smooth(aes(y=SR, x=ID), method="loess", color="black") + 
+  geom_label_repel(aes(x=ID, label=Language, fill=Family), color="black", alpha=0.5, data=unique(info.rate.data[,c("ID","Language","Family")]), y=max(info.rate.data$SR), size=3, show.legend = FALSE) +
+  ylab("SR") + xlab("ID") + theme(legend.position="bottom");
+dev.off();
+
+require(ggpubr);
+tiff("./figures/Figure-pairwise-dists.tiff", width=4, height=4, units="in", compression="lzw", res=600, type="cairo");
+d <- pairwise.dists.long;
+ggboxplot(d[d$Method=="Jensen-Shannon",], x="Measure", y="Distance", color="Measure", fill="Measure", alpha=0.25) + ylab("Jensen-Shannon divergence") +
+  stat_compare_means(comparisons=list(c("NS", "SR"), c("NS", "IR"), c("SR", "IR")), paired=TRUE, method="wilcox.test", p.adjust.method="bonferroni", label="p.signif") +
+  theme(legend.position="none");
+dev.off();
+```
+
+
+
+
