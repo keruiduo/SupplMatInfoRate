@@ -1,5 +1,5 @@
 ---
-title: "The bio-cultural niche of language is optimised for information transmission"
+title: "Human languages share an optimal information transmission rate"
 subtitle: "Full statistical analysis and plots"
 author: "Christophe Coupé, Dan Dediu and François Pellegrino"
 date: '`r Sys.time()`'
@@ -20,35 +20,37 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 library(ggplot2)
 library(reshape2)
-library(rgl)
-library(gplots)
-library(cluster)
-library(fpc)
-library(factoextra)
-library(multcompView)
-library(moments)
+#library(rgl)
+#library(gplots)
+#library(cluster)
+#library(fpc)
+#library(factoextra)
+#library(multcompView)
 library(plyr)
-library(parallel)
-library(rmarkdown)
-library(stargazer)
+#library(rmarkdown)
+#library(stargazer)
 library(lmerTest)
 library(gamlss)
 library(gamlss.mx)
 library(sjstats)
 library(sjPlot)
-library(sjmisc)
-library(extrafont)
+#library(sjmisc)
+#library(extrafont)
 library(moments);
-library(plyr);
+#library(plyr);
 library(parallel);
 library(pander);
 
-knitr::opts_chunk$set(echo = TRUE, fig.align="center", warning=FALSE, message=FALSE,
-                      fig.width=9, fig.height=6, fig.align = "center", comment=NA,
-                      fig.path = "figures/", dpi=300, cache=TRUE, autodep=TRUE);
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE, # default code chunk options
+                      fig.width=9, fig.height=6, fig.align = "center", comment=NA, # default figure dimensions
+                      fig.path = "figures/", # save images to ./figures/
+                      dpi=72, dev="jpeg", # please set dpi=300 and comment out dev="jpeg" for high resolution images but very big resulting HTML document
+                      cache=TRUE, autodep=TRUE); # cache computations
 dir.create("./figures", showWarnings=FALSE); # figures are saved here
 
 do.expensive.computations = FALSE; # force the expensive computations
+
+no.cores <- max(c(detectCores()-2, 1), na.rm=TRUE); # use less than 2 of the cores in the system (this includes hyperthreded ones)
 
 options(width = 250);
 options(contrasts=c("contr.treatment","contr.poly"));
@@ -256,7 +258,7 @@ names(info.rate.data) <- c("Language", "Text", "Spker", "Speaker", "Sex", "Durat
 
 ## Introduction
 
-This `Rmarkdown` script (and corresponding TAB-separated CSV input data file `InfoRateData(2017).csv` and the resulting `HTML` document) contain the full analysis and plotting code accompanying the paper *The bio-cultural niche of language is optimised for information transmission*.
+This `Rmarkdown` script (and corresponding TAB-separated CSV input data file `InfoRateData(2017).csv` and the resulting `HTML` document) contain the full analysis and plotting code accompanying the paper *Human languages share an optimal information transmission rate*.
 
 
 ## The data
@@ -1274,7 +1276,7 @@ if( do.expensive.computations || !file.exists("./unimodality-tests-cached.RData"
     df$IR <- (df$SR * df$ID);
     rbind(cbind("case"=paste0("PM1 ",i), "measure"="SR", test.unimodality(df$SR)),
           cbind("case"=paste0("PM1 ",i), "measure"="IR", test.unimodality(df$IR)));
-  }, mc.cores=4));
+  }, mc.cores=no.cores));
   unimod <- rbind(unimod, tmp);
   
   
@@ -1294,7 +1296,7 @@ if( do.expensive.computations || !file.exists("./unimodality-tests-cached.RData"
     df$IR <- vapply(1:nrow(df), function(i) (df$SR[i] * x$ID[ x$Language == df$Language[i] ]), numeric(1));
     rbind(cbind("case"=paste0("PM2 ",i), "measure"="SR", test.unimodality(df$SR)),
           cbind("case"=paste0("PM2 ",i), "measure"="IR", test.unimodality(df$IR)));
-  }, mc.cores=4));
+  }, mc.cores=no.cores));
   unimod <- rbind(unimod, tmp);
   
   
@@ -1317,7 +1319,7 @@ if( do.expensive.computations || !file.exists("./unimodality-tests-cached.RData"
     spker.means$IR.mean <- spker.means$SR.mean * spker.means$ID;
     rbind(cbind("case"=paste0("PM3 ",i), "measure"="SR", test.unimodality(spker.means$SR.mean)),
           cbind("case"=paste0("PM3 ",i), "measure"="IR", test.unimodality(spker.means$IR.mean)));
-  }, mc.cores=4));
+  }, mc.cores=no.cores));
   unimod <- rbind(unimod, tmp);
   
   
@@ -1341,7 +1343,7 @@ if( do.expensive.computations || !file.exists("./unimodality-tests-cached.RData"
     df$IR <- (df$SR * df$ID);
     rbind(cbind("case"=paste0("PM4 ",i), "measure"="SR", test.unimodality(df$SR)),
           cbind("case"=paste0("PM4 ",i), "measure"="IR", test.unimodality(df$IR)));
-  }, mc.cores=4));
+  }, mc.cores=no.cores));
   unimod <- rbind(unimod, tmp);
   
   save(unimod, file="./unimodality-tests-cached.RData", compress="xz");
@@ -1731,7 +1733,8 @@ We compute various distances between languages (as implemented by function `dist
 ```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=6, fig.cap="Comparing the distribution of pairwise distances between languages."}
 # Compute all sorts of distances between all paris of grouping.var values for the values of measured.var:
 .compute.pariwise.distances.for.variable <- function(grouping.var, # the grouping variable from which the pairs are formed
-                                                     measured.var  # the measured variable which provides the observed values
+                                                     measured.var, # the measured variable which provides the observed values
+                                                     normalize=TRUE # should the variable be normalized between 0 and 1?
 )
 {
   require(philentropy);
@@ -1770,25 +1773,33 @@ We compute various distances between languages (as implemented by function `dist
     h2 <- hist(measured.var[s2], breaks=h.all, plot=FALSE);
     x1 <- h1$counts; x2 <- h2$counts;
     x1[x1==0] <- 1.0e-20; x2[x2==0] <- 1.0e-20; # remove zeros
-    x1 <- x1 / sum(x1); x2 <- x2 / sum(x2);
+    x1 <- x1 / sum(x1); x2 <- x2 / sum(x2); # normalize between 0 and 1
     h12 <- rbind(x1,x2); # as matrix (required by philentropy::distance())
     
+    if( normalize )
+    {
+      est.prob <- NULL;
+    } else
+    {
+      est.prob <- "empirical";
+    }
+    
     c("Kolmogorov–Smirnov"=as.numeric(suppressWarnings(ks.test(measured.var[s1], measured.var[s2])$statistic)),
-      "Kullback-Leibler"  =as.numeric(philentropy::distance(h12, method="kullback-leibler")),
-      "Jensen-Shannon"    =as.numeric(philentropy::distance(h12, method="jensen-shannon")),
-      "Hellinger"         =as.numeric(philentropy::distance(h12, method="hellinger")),
-      "Squared-Chi"       =as.numeric(philentropy::distance(h12, method="squared_chi")));
+      "Kullback-Leibler"  =as.numeric(philentropy::distance(h12, method="kullback-leibler", unit="log", est.prob=est.prob)),
+      "Jensen-Shannon"    =as.numeric(philentropy::distance(h12, method="jensen-shannon",   unit="log", est.prob=est.prob)),
+      "Hellinger"         =as.numeric(philentropy::distance(h12, method="hellinger",        unit="log", est.prob=est.prob)),
+      "Squared-Chi"       =as.numeric(philentropy::distance(h12, method="squared_chi",      unit="log", est.prob=est.prob)));
   }));
   grouping.var.pairs <- cbind(grouping.var.pairs, d);
   return (grouping.var.pairs);
 }
 
 # Pairwise language distances for various variables:  
-pairwise.dists <- do.call(rbind, lapply(c("NS", "SR", "IR"), function(s)
+tmp <- capture.output(pairwise.dists <- do.call(rbind, lapply(c("NS", "SR", "IR"), function(s)
 {
   tmp <- .compute.pariwise.distances.for.variable(info.rate.data$Language, info.rate.data[,s])
   return (cbind("Measure"=s, tmp)); 
-}));
+})), type="message");
 names(pairwise.dists)[1+(1:2)] <- paste0("Language",1:2);
 pairwise.dists <- merge(pairwise.dists, unique(info.rate.data[,c("Language", "Family")]), by.x="Language1", by.y="Language", all.x=TRUE); names(pairwise.dists)[ncol(pairwise.dists)] <- "LgFam1";
 pairwise.dists <- merge(pairwise.dists, unique(info.rate.data[,c("Language", "Family")]), by.x="Language2", by.y="Language", all.x=TRUE); names(pairwise.dists)[ncol(pairwise.dists)] <- "LgFam2";
@@ -1882,13 +1893,43 @@ pander(sessionInfo(), compact=TRUE);
 Here we generate the figures used in the main paper (saved to the `./figures` folder as 600 DPI TIFF files `Figure-*.tiff`).
 
 ```{r echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+# Replicable but visually pleasing results:
+set.seed(13);
+
 tiff("./figures/Figure-SR-IR-distribs.tiff", width=8, height=5, units="in", compression="lzw", res=600, type="cairo");
 tmp <- melt(info.rate.data, id.vars=c("Language", "Text", "Speaker", "Family"), measure.vars=c("SR", "IR"));
 ggplot(tmp, aes(value, fill = Language, colour = Language)) + geom_density(alpha = 0.1) + 
   facet_wrap("variable", scales="free") + geom_density(aes(value), data=tmp, fill=NA, color="black") + theme(legend.position="bottom");
 dev.off();
 
-require("ggrepel");
+require(ggridges);
+require(dplyr);
+require(RColorBrewer);
+tiff("./figures/Figure-SR-IR-distribs-v2.tiff", width=8, height=7, units="in", compression="lzw", res=600, type="cairo");
+tmp <- melt(info.rate.data, id.vars=c("Language", "Text", "Speaker", "Family"), measure.vars=c("SR", "IR"));
+tmp$Language <- as.character(tmp$Language);
+tmp$alpha <- 0.1;
+tmp.summaries <- tmp %>% group_by(variable) %>% summarise("mean"=mean(value), "median"=median(value), "sd"=sd(value), "IQR"=IQR(value));
+SRs.by.language <- tmp[tmp$variable == "SR",] %>% group_by(Language, variable) %>% summarise("mean"=mean(value));
+tmp <- rbind(tmp, data.frame("Language"="All", "Text"=tmp$Text, "Speaker"=tmp$Speaker, "Family"="All", "variable"=tmp$variable, "value"=tmp$value, "alpha"=0.0));
+#tmp$Language <- reorder(tmp$Language, tmp$Family, FUN=unique);
+tmp$Language <- factor(tmp$Language, levels=c(as.character(SRs.by.language$Language)[order(SRs.by.language$mean)], "All"));
+tmp.colors <- c("black", brewer.pal(length(unique(tmp$Family))-1, "Spectral")); names(tmp.colors) <- c("All", sort(setdiff(unique(tmp$Family), "All")));
+ggplot(tmp, aes(x=value, y=Language, fill = Family, colour = Family)) + 
+  geom_density_ridges2(aes(height = ..density..), color=gray(0.25), alpha = 0.5, scale=0.85, size=0.75, stat="density") + # ensure the density estimate is done separately per facet (see geom_density_ridges help)
+  #geom_point(alpha=0.3, size=1) + 
+  geom_spoke(mapping=aes(x=value, y=Language, angle=pi/2, radius=0.20), alpha=0.3, color="black", size=0.25, show.legend=FALSE) + 
+  # show median ± IQR
+  geom_vline(aes(xintercept=mean), data=tmp.summaries, size=0.5, alpha=0.75, color=gray(0.1)) + 
+  geom_vline(aes(xintercept=mean-1.0*sd), data=tmp.summaries, size=0.5, alpha=0.75, linetype="dashed", color=gray(0.1)) + 
+  geom_vline(aes(xintercept=mean+1.0*sd), data=tmp.summaries, size=0.5, alpha=0.75, linetype="dashed", color=gray(0.1)) +
+  facet_wrap("variable", scales="free") + 
+  scale_color_manual(values=tmp.colors) + scale_fill_manual(values=tmp.colors) + 
+  theme_bw() + 
+  xlab("value (SR or IR)") + ylab("density (by Language)");
+dev.off();
+
+require(ggrepel);
 tiff("./figures/Figure-SR-vs-ID.tiff", width=6, height=7, units="in", compression="lzw", res=600, type="cairo");
 ggplot(info.rate.data, aes(y=SR, x=ID, color=Family)) + ylim(range(info.rate.data$SR)+c(0.0,0.5)) + 
   geom_point(alpha=0.5, size=1) + 
