@@ -20,24 +20,13 @@ editor_options:
 knitr::opts_chunk$set(echo = TRUE)
 library(ggplot2)
 library(reshape2)
-#library(rgl)
-#library(gplots)
-#library(cluster)
-#library(fpc)
-#library(factoextra)
-#library(multcompView)
 library(plyr)
-#library(rmarkdown)
-#library(stargazer)
 library(lmerTest)
 library(gamlss)
 library(gamlss.mx)
 library(sjstats)
 library(sjPlot)
-#library(sjmisc)
-#library(extrafont)
 library(moments);
-#library(plyr);
 library(parallel);
 library(pander);
 
@@ -205,10 +194,10 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 ```{r loading_data, echo=FALSE, message=FALSE, warning=FALSE}
 # Loading and preparing the data:
 
-info.rate.data <- read.table("./InfoRateData(2017).csv", header=TRUE, sep="\t", quote="", stringsAsFactors=FALSE);
+info.rate.data <- read.table("./InfoRateData.csv", header=TRUE, sep="\t", quote="", stringsAsFactors=FALSE);
 
 # Add language family data:
-info.rate.data$LgFam <- Vectorize(function(a) # assign language family to langauge codes
+info.rate.data$Family <- Vectorize(function(a) # assign language family to langauge codes
 {
   switch(as.character(a),
          "CAT" = "Indo-European",
@@ -234,38 +223,22 @@ info.rate.data$LgFam <- Vectorize(function(a) # assign language family to langau
 
 # Convert to factors:
 info.rate.data$Text <- as.factor(info.rate.data$Text)
-info.rate.data$Code_Spker <- as.factor(info.rate.data$Code_Spker)
+info.rate.data$Speaker <- as.factor(info.rate.data$Speaker)
 info.rate.data$Language <- as.factor(info.rate.data$Language)
 info.rate.data$Sex <- as.factor(info.rate.data$Sex)
-
-# Rename variables:
-# Language -> Language
-# Text -> Text
-# Spker -> Spker 
-# Code_Spker -> Speaker
-# Sex -> Sex
-# Duration -> Duration
-# NbSyllables -> NS
-# SpeechRate -> SR
-# ShannonEntropy -> ShE
-# ConditionalEntropy -> ID
-# InfoRate_ShannonEntropy -> ShIR
-# InfoRate_ConditionalEntropy -> IR
-# LgFam -> Family
-names(info.rate.data) <- c("Language", "Text", "Spker", "Speaker", "Sex", "Duration", "NS", "SR", "ShE", "ID", "ShIR", "IR", "Family")
 ```
 
 
 ## Introduction
 
-This `Rmarkdown` script (and corresponding TAB-separated CSV input data file `InfoRateData(2017).csv` and the resulting `HTML` document) contain the full analysis and plotting code accompanying the paper *Human languages share an optimal information transmission rate*.
+This `Rmarkdown` script (and corresponding TAB-separated CSV input data file `InfoRateData.csv` and the resulting `HTML` document) contain the full analysis and plotting code accompanying the paper *Human languages share an optimal information transmission rate*.
 
 
 ## The data
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 # Transform it into the long format:
-info.rate.data.long <- melt(info.rate.data, id.vars=c("Language", "Text", "Spker", "Speaker", "Sex", "Family"));
+info.rate.data.long <- melt(info.rate.data, id.vars=c("Language", "Text", "Speaker", "Sex", "Family"));
 # Extract speakers, languages and texts:
 speakers <- sort(unique(info.rate.data$Speaker)); 
 languages <- sort(unique(info.rate.data$Language)); 
@@ -324,17 +297,16 @@ Additionally, no syllabiﬁcation was required for Sino-Tibetan languages (*Cant
 
 The data is structured as follows:
 
-  - *Language* is the unique language ID with `r length(unique(info.rate.data$Language))` possible values `r paste0('"',sort(unique(info.rate.data$Language)),'"',collapse=", ")`;
+  - *Language* is the unique language ISO 639-3 ID with `r length(unique(info.rate.data$Language))` possible values `r paste0('"',sort(unique(info.rate.data$Language)),'"',collapse=", ")`;
   - *Language family* is the language family with `r length(unique(info.rate.data$Family))` possible values `r paste0('"',sort(unique(info.rate.data$Family)),'"',collapse=", ")`;
   - *Text* is the text identifier (similar across languages and speakers) with `r length(unique(info.rate.data$Text))` possible values `r paste0('"',sort(unique(info.rate.data$Text)),'"',collapse=", ")`;
-  - *Spker* and is the unique speaker ID with possible values: `r length(unique(info.rate.data$Spker))` -- a speaker might have produced texts in more than one language or the same code might have been use more than once;
-  - *Speaker* is the concatenation of the speaker's language and ID (a speaker may produce more than a single language): `r length(unique(info.rate.data$Speaker))`;
+  - *Speaker* is the unique speaker's ID: `r length(unique(info.rate.data$Speaker))`;
   - *Sex* is the speaker's sex;
-  - *Duration* is the texts' duration in seconds as spoken by the given speaker;
+  - *Duration* is the texts' duration in seconds as spoken by the given speaker (pauses longer than 150ms being excluded);
   - *NS* is the texts' number of of syllables (the same for a given text in a given language);
   - *SR* is the speech rate (syllables/second) for a given text spoken by a given speaker;
-  - *ShE* and *ID* are language-level entropy estimates;
-  - *ShIR* and *IR* are text x speaker properties obtained by multiplying *SR* by *ShE* and *ID* respectively.
+  - *ShE* (resp. *ID*) is the first-order (resp. second-order) language-level entropy estimate;
+  - *ShIR* and *IR* are text * speaker properties obtained by multiplying *SR* by *ShE* and *ID* respectively.
   
 
 ### Exploratory plots and summaries
