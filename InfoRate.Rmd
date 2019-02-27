@@ -586,10 +586,14 @@ get_re_distrib(residuals(lmr), "Residuals")
 get_re_distrib(ranef(lmr)$Text[,1], "Levels of Text as random effect")
 get_re_distrib(ranef(lmr)$Language[,1],  "Levels of Language as random effect")
 get_re_distrib(ranef(lmr)$Speaker[,1], "Levels of Speaker as random effect")
-sjp.lmer(lmr0,
-         facet.grid = FALSE,
-         sort.est = "sort.all",
-         y.offset = .4)
+# sjp.lmer(lmr0,
+#          facet.grid = FALSE,
+#          sort.est = "sort.all",
+#          y.offset = .4)
+plot_model(lmr,
+           facet.grid = FALSE,
+           sort.est = "sort.all",
+           y.offset = .4)
 ```
 
 
@@ -627,7 +631,11 @@ get_re_distrib(residuals(lmr), "Residuals")
 get_re_distrib(ranef(lmr)$Text[,1], "Levels of Text as random effect")
 get_re_distrib(ranef(lmr)$Language[,1],  "Levels of Language as random effect")
 get_re_distrib(ranef(lmr)$Speaker[,1], "Levels of Speaker as random effect")
-sjp.lmer(lmr0,
+# sjp.lmer(lmr0,
+#          facet.grid = FALSE,
+#          sort.est = "sort.all",
+#          y.offset = .4)
+plot_model(lmr,
          facet.grid = FALSE,
          sort.est = "sort.all",
          y.offset = .4)
@@ -644,8 +652,10 @@ We will use a Gaussian distribution (with fixed or modelled variance).
 
 ##### Fixed *&sigma;* 
 ```{r SR_check_NO_no_sigma, echo=FALSE}
+d <- info.rate.data[,c("SR","Sex","Text","Language","Speaker")]; # use only the columns we actually need (avoid errors about NAs in other columns)
 model.NO.no.modelled.sigma.SR <- gamlss(SR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
-                                        data=info.rate.data, family=NO(mu.link="identity"),
+                                        data=d, 
+                                        family=NO(mu.link="identity"),
                                         control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
 
 plot(model.NO.no.modelled.sigma.SR)
@@ -657,9 +667,11 @@ cat("\nAIC=",AIC(model.NO.no.modelled.sigma.SR),"\n");
 ##### Modelled *&sigma;* 
 
 ```{r SR_check_NO, echo=FALSE}
+d <- info.rate.data[,c("SR","Sex","Text","Language","Speaker")]; # use only the columns we actually need (avoid errors about NAs in other columns)
 model.NO.SR <- gamlss(SR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
                       sigma.fo = ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
-                      data=info.rate.data, family=NO(mu.link="identity"), 
+                      data=d, 
+                      family=NO(mu.link="identity"), 
                       control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
 
 plot(model.NO.SR)
@@ -714,8 +726,10 @@ getSmo(model.NO.SR, "sigma", which = 3)
 
 ##### Fixed *&sigma;* 
 ```{r IR_check_NO_no_sigma, echo=FALSE}
+d <- info.rate.data[,c("IR","Sex","Text","Language","Speaker")]; # use only the columns we actually need (avoid errors about NAs in other columns)
 model.NO.no.modelled.sigma.IR <- gamlss(IR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
-                                        data=info.rate.data, family=NO(mu.link="identity"),
+                                        data=d, 
+                                        family=NO(mu.link="identity"),
                                         control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
 
 plot(model.NO.no.modelled.sigma.IR)
@@ -727,9 +741,11 @@ cat("\nAIC=",AIC(model.NO.no.modelled.sigma.IR),"\n");
 ##### Modelled *&sigma;* 
 
 ```{r IR_check_NO, echo=FALSE}
+d <- info.rate.data[,c("IR","Sex","Text","Language","Speaker")]; # use only the columns we actually need (avoid errors about NAs in other columns)
 model.NO.IR <- gamlss(IR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
                       sigma.fo = ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
-                      data=info.rate.data, family=NO(mu.link="identity"), 
+                      data=d, 
+                      family=NO(mu.link="identity"), 
                       control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
 
 plot(model.NO.IR)
@@ -784,9 +800,11 @@ Let's model SR with ID as an additional predictor (fixed effect).
 *N.B.* In this case, we must drop Language as a random effect, since each language has, by definition, only one value of ID.
 
 ```{r SR_ID_gamlss, echo=FALSE}
+d <- info.rate.data[,c("SR","ID","Sex","Text","Speaker")]; # use only the columns we actually need (avoid errors about NAs in other columns)
 model.NO.SR.ID <- gamlss(SR ~ 1 + ID + Sex + random(Text) + random(Speaker), 
                          sigma.fo = ~ 1 + ID + Sex + random(Text) + random(Speaker), 
-                         data=info.rate.data, family=NO(mu.link="identity"), 
+                         data=d, 
+                         family=NO(mu.link="identity"), 
                          control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
 
 summary(model.NO.SR.ID)
@@ -840,11 +858,12 @@ In what follows, mixing probabilities are independent from factors such as Sex.
 Between 1 and 5 Gaussian distributions:
 
 ```{r SR_mixture, message = FALSE, echo=FALSE}
-mix.SR.NO.1 <- gamlssMX(SR ~ 1, family=NO, K=1, data=info.rate.data, plot=FALSE)
-mix.SR.NO.2 <- gamlssMX(SR ~ 1, family=NO, K=2, data=info.rate.data, plot=FALSE)
-mix.SR.NO.3 <- gamlssMX(SR ~ 1, family=NO, K=3, data=info.rate.data, plot=FALSE)
-mix.SR.NO.4 <- gamlssMX(SR ~ 1, family=NO, K=4, data=info.rate.data, plot=FALSE)
-mix.SR.NO.5 <- gamlssMX(SR ~ 1, family=NO, K=5, data=info.rate.data, plot=FALSE)
+d <- info.rate.data[,c("SR"),drop=FALSE]; # use only the columns we actually need (avoid errors about NAs in other columns)
+mix.SR.NO.1 <- gamlssMX(SR ~ 1, family=NO, K=1, data=d, plot=FALSE)
+mix.SR.NO.2 <- gamlssMX(SR ~ 1, family=NO, K=2, data=d, plot=FALSE)
+mix.SR.NO.3 <- gamlssMX(SR ~ 1, family=NO, K=3, data=d, plot=FALSE)
+mix.SR.NO.4 <- gamlssMX(SR ~ 1, family=NO, K=4, data=d, plot=FALSE)
+mix.SR.NO.5 <- gamlssMX(SR ~ 1, family=NO, K=5, data=d, plot=FALSE)
 ```
 
 ***1 component***
@@ -901,11 +920,12 @@ legend("topleft", legend=c("K=1","K=2", "K=3", "K=4", "K=5"), lty=c(2,1,2,2,2), 
 Between 1 and 5 Gaussian distributions:
 
 ```{r IR_mixture, message = FALSE, echo=FALSE}
-mix.IR.NO.1 <- gamlssMX(IR ~ 1, family=NO, K=1, data=info.rate.data, plot=FALSE)
-mix.IR.NO.2 <- gamlssMX(IR ~ 1, family=NO, K=2, data=info.rate.data, plot=FALSE)
-mix.IR.NO.3 <- gamlssMX(IR ~ 1, family=NO, K=3, data=info.rate.data, plot=FALSE)
-mix.IR.NO.4 <- gamlssMX(IR ~ 1, family=NO, K=4, data=info.rate.data, plot=FALSE)
-mix.IR.NO.5 <- gamlssMX(IR ~ 1, family=NO, K=5, data=info.rate.data, plot=FALSE)
+d <- info.rate.data[,c("IR"),drop=FALSE]; # use only the columns we actually need (avoid errors about NAs in other columns)
+mix.IR.NO.1 <- gamlssMX(IR ~ 1, family=NO, K=1, data=d, plot=FALSE)
+mix.IR.NO.2 <- gamlssMX(IR ~ 1, family=NO, K=2, data=d, plot=FALSE)
+mix.IR.NO.3 <- gamlssMX(IR ~ 1, family=NO, K=3, data=d, plot=FALSE)
+mix.IR.NO.4 <- gamlssMX(IR ~ 1, family=NO, K=4, data=d, plot=FALSE)
+mix.IR.NO.5 <- gamlssMX(IR ~ 1, family=NO, K=5, data=d, plot=FALSE)
 ```
 
 ***1 component***
