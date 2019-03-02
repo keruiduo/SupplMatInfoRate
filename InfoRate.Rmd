@@ -300,8 +300,9 @@ The data is structured as follows:
   - *Language* is the unique language ISO 639-3 ID with `r length(unique(info.rate.data$Language))` possible values `r paste0('"',sort(unique(info.rate.data$Language)),'"',collapse=", ")`;
   - *Language family* is the language family with `r length(unique(info.rate.data$Family))` possible values `r paste0('"',sort(unique(info.rate.data$Family)),'"',collapse=", ")`;
   - *Text* is the text identifier (similar across languages and speakers) with `r length(unique(info.rate.data$Text))` possible values `r paste0('"',sort(unique(info.rate.data$Text)),'"',collapse=", ")`;
-  - *Speaker* is the unique speaker's ID: `r length(unique(info.rate.data$Speaker))`;
+  - *Speaker* is the unique speaker's ID (there are `r length(unique(info.rate.data$Speaker))` in the dataset);
   - *Sex* is the speaker's sex;
+  - *Age* is the speaker's age (available only for a subset of `r tmp <- unique(info.rate.data[,c("Speaker","Age")]); sum(!is.na(tmp$Age))` speakers);
   - *Duration* is the texts' duration in seconds as spoken by the given speaker (pauses longer than 150ms being excluded);
   - *NS* is the texts' number of of syllables (the same for a given text in a given language);
   - *SR* is the speech rate (syllables/second) for a given text spoken by a given speaker;
@@ -311,12 +312,49 @@ The data is structured as follows:
 
 ### Exploratory plots and summaries
 
-#### NS
+#### Speaker characteristics
 
-```{r NS by Language and Text, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10, fig.cap="NS: exploratory plots."}
+```{r Speaker characteristics, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10, fig.cap="NS: exploratory plots."}
 tmp <- info.rate.data; 
 tmp$Language <- factor(tmp$Language, levels=c("VIE","EUS","CAT","DEU","ENG","FRA","ITA","SPA","SRP","JPN","KOR","CMN","YUE","THA","TUR","FIN","HUN"));
 tmp$Family <- factor(tmp$Family); tmp$Family <- revalue(tmp$Family, c("Austroasiatic"="AA", "Basque"="B", "Indo-European"="IE", "Japanese"="J", "Korean"="K", "Sino-Tibetan"="ST", "Tai-Kadai"="TK", "Turkic"="T", "Uralic"="U"));
+
+knitr::kable(unique(tmp[,c("Speaker", "Sex", "Language", "Age")]) %>% 
+               dplyr::group_by(Language) %>%
+               dplyr::summarise("no.speakers"=length(Speaker), 
+                                #"females"=sum(Sex=="F",na.rm=TRUE), 
+                                "females.perc"=100*sum(Sex=="F",na.rm=TRUE)/length(Speaker),
+                                "with.age"=sum(!is.na(Age)), 
+                                "mean.age"=mean(Age,na.rm=TRUE), 
+                                #"median.age"=median(Age,na.rm=TRUE), 
+                                "sd.age"=sd(Age,na.rm=TRUE),
+                                "ages"=paste0("(",paste0(sort(Age),collapse=", "),")")) %>%
+               dplyr::arrange(as.character(Language)),
+             col.names=c("Lng", 
+                         "# spkrs", 
+                         #"# females", 
+                         "% fem", 
+                         "# age", 
+                         "mean(age)", 
+                         #"median(age)", 
+                         "sd(age)", 
+                         "actual ages"),
+             row.names=FALSE, 
+             digits=c(NA,
+                      0,
+                      #0,
+                      1,
+                      0,
+                      1,
+                      #1,
+                      1,
+                      NA), caption="Distribution of speaker number and characteristics (sex and age) by language. *Lng*=language, *# spkrs*=number of speakers, *% fem*=percent female speakers, *# age*=number of speakers with age info, and for those, *mean(age)*=mean age, *sd(age)*=standard deviation of age, and *actual ages*=the sorted ages.");
+
+```
+
+#### NS
+
+```{r NS by Language and Text, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10, fig.cap="NS: exploratory plots."}
 multiplot(plotlist=list(ggplot(tmp, aes(x=NS)) + geom_histogram(col="yellow") + xlab("NS"),
                         {
                           # From http://mgimond.github.io/ES218/Week06a.html:
@@ -360,7 +398,34 @@ multiplot(plotlist=list(ggplot(tmp, aes(x=SR)) + geom_histogram(col="yellow") + 
 ```
 
 ```{r SR by Speaker, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="SR per speaker."}
-ggplot(info.rate.data, aes(x=Speaker, y=SR, color=Language)) + geom_boxplot() + ylab("SR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+# ggplot(info.rate.data, aes(x=Speaker, y=SR, color=Language, fill=Sex)) + 
+#   geom_boxplot() + 
+#   scale_fill_manual(values=c("F"="white", "M"="gray50")) +
+#   ylab("SR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+ggplot(info.rate.data %>% 
+         mutate(Speaker=reorder(Speaker, SR, median)) %>%
+         mutate(Speaker=reorder(Speaker, as.character(Sex), min)) %>% 
+         mutate(Speaker=reorder(Speaker, as.character(Language), min)), 
+       aes(x=Speaker, y=SR, color=Language, fill=Sex)) + 
+  geom_boxplot() + #geom_vline(aes(xintercept=Language)) +
+  scale_fill_manual(values=c("F"="white", "M"="gray70")) +
+  #facet_wrap(. ~ Language, scales="free_x") +
+  ylab("SR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+```
+
+```{r SR by Sex and Age across Languages, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="SR by Sex and Age across Languages."}
+ggplot(info.rate.data, 
+       aes(x=Age, y=SR, color=Language, shape=Sex, fill=Sex)) + 
+  geom_point() +
+  geom_smooth(aes(group=Sex), method="lm", formula=y ~ poly(x,2));
+```
+
+```{r SR by Sex, Age and Language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=8, fig.cap="SR by Sex, Age and Language."}
+ggplot(info.rate.data, 
+       aes(x=Age, y=SR, color=Sex, shape=Sex)) + 
+  geom_point() +
+  geom_smooth(method="lm", formula=y ~ poly(x,2)) +
+  facet_wrap(. ~ Language, scales="free_x");
 ```
 
 ```{r SR distributions by language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=6, fig.cap="SR by language."}
@@ -456,7 +521,31 @@ multiplot(plotlist=list(ggplot(tmp, aes(x=ShIR)) + geom_histogram(col="yellow") 
 ```
 
 ```{r ShIR by Speaker, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="ShIR per speaker."}
-ggplot(info.rate.data, aes(x=Speaker, y=ShIR, color=Language)) + geom_boxplot() + ylab("ShIR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+#ggplot(info.rate.data, aes(x=Speaker, y=ShIR, color=Language)) + geom_boxplot() + ylab("ShIR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+ggplot(info.rate.data %>% 
+         mutate(Speaker=reorder(Speaker, ShIR, median)) %>%
+         mutate(Speaker=reorder(Speaker, as.character(Sex), min)) %>% 
+         mutate(Speaker=reorder(Speaker, as.character(Language), min)), 
+       aes(x=Speaker, y=ShIR, color=Language, fill=Sex)) + 
+  geom_boxplot() + #geom_vline(aes(xintercept=Language)) +
+  scale_fill_manual(values=c("F"="white", "M"="gray70")) +
+  #facet_wrap(. ~ Language, scales="free_x") +
+  ylab("ShIR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+```
+
+```{r ShIR by Sex and Age across Languages, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="ShIR by Sex and Age across Languages."}
+ggplot(info.rate.data, 
+       aes(x=Age, y=ShIR, color=Language, shape=Sex, fill=Sex)) + 
+  geom_point() +
+  geom_smooth(aes(group=Sex), method="lm", formula=y ~ poly(x,2));
+```
+
+```{r ShIR by Sex, Age and Language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=8, fig.cap="ShIR by Sex, Age and Language."}
+ggplot(info.rate.data, 
+       aes(x=Age, y=ShIR, color=Sex, shape=Sex)) + 
+  geom_point() +
+  geom_smooth(method="lm", formula=y ~ poly(x,2)) +
+  facet_wrap(. ~ Language, scales="free_x");
 ```
 
 ```{r ShIR distributions by language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=6, fig.cap="ShIR by language."}
@@ -480,7 +569,31 @@ multiplot(plotlist=list(ggplot(tmp, aes(x=IR)) + geom_histogram(col="yellow") + 
 ```
 
 ```{r IR by Speaker, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="IR per speaker."}
-ggplot(info.rate.data, aes(x=Speaker, y=IR, color=Language)) + geom_boxplot() + ylab("IR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+#ggplot(info.rate.data, aes(x=Speaker, y=IR, color=Language)) + geom_boxplot() + ylab("IR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+ggplot(info.rate.data %>% 
+         mutate(Speaker=reorder(Speaker, IR, median)) %>%
+         mutate(Speaker=reorder(Speaker, as.character(Sex), min)) %>% 
+         mutate(Speaker=reorder(Speaker, as.character(Language), min)), 
+       aes(x=Speaker, y=IR, color=Language, fill=Sex)) + 
+  geom_boxplot() + #geom_vline(aes(xintercept=Language)) +
+  scale_fill_manual(values=c("F"="white", "M"="gray70")) +
+  #facet_wrap(. ~ Language, scales="free_x") +
+  ylab("IR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+```
+
+```{r IR by Sex and Age across Languages, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="IR by Sex and Age across Languages."}
+ggplot(info.rate.data, 
+       aes(x=Age, y=IR, color=Language, shape=Sex, fill=Sex)) + 
+  geom_point() +
+  geom_smooth(aes(group=Sex), method="lm", formula=y ~ poly(x,2));
+```
+
+```{r IR by Sex, Age and Language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=8, fig.cap="IR by Sex, Age and Language."}
+ggplot(info.rate.data, 
+       aes(x=Age, y=IR, color=Sex, shape=Sex)) + 
+  geom_point() +
+  geom_smooth(method="lm", formula=y ~ poly(x,2)) +
+  facet_wrap(. ~ Language, scales="free_x");
 ```
 
 ```{r IR distributions by language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=6, fig.cap="IR by language."}
@@ -793,7 +906,6 @@ getSmo(model.NO.IR, "sigma", which = 2)
 getSmo(model.NO.IR, "sigma", which = 3)
 ``` 
 
-
 ## Modelling the relationship between SR and ID
 
 Let's model SR with ID as an additional predictor (fixed effect).
@@ -847,6 +959,301 @@ getSmo(model.NO.SR.ID, "sigma", which = 1)
 ```{r SR_ID_re_sigma_lg, echo=FALSE}
 getSmo(model.NO.SR.ID, "sigma", which = 2)
 ```
+
+
+
+## Do *Age* and *Sex* matter?
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+sr.sex.age.lmer <-lmer(SR ~ Age * Sex + (1 | Text) + (1 | Language), data=info.rate.data);
+summary(sr.sex.age.lmer);
+
+ir.sex.age.lmer <-lmer(IR ~ Age * Sex + (1 | Text) + (1 | Language), data=info.rate.data);
+summary(ir.sex.age.lmer);
+```
+
+So, it seems * Age* and *Sex* are both worth including in our models (even if we have to discard quite a bit of data because of missing *Age* info).
+(In fact, the effect of *Age* seems more significant than that of *Sex*.)
+
+In the following, we investigate if *Age* does matter when using GAMLSS modelling...
+
+
+### GAMLSS with Age
+
+Bescause there is missing data fro *Age*, and because the GAMLSS models require no missing data, we will fit the models with *Age* (and its interaction with *Sex*) on the subset of the data that contains only those speakers with *Age* info.
+To make comparability possible, we also fit the same models but without *Age* on the exact same subset of the data.
+
+```{r subselect the dataset contaning only the relevant info (including Age), echo=FALSE}
+info.rate.data.for.age <- subset(info.rate.data[,c("SR","IR","ID","Sex","Text","Language","Speaker","Age")], !is.na(Age)); # use only the columns we actually need (and remove the NAs)
+info.rate.data.for.age[] <- lapply(info.rate.data.for.age, function(x) if(is.factor(x)) factor(x) else x); # and make sure the factors don't have left-over levels
+```
+
+#### SR
+
+##### Fixed or modelled *&sigma;* (variance)
+
+###### Fixed *&sigma;* 
+
+```{r SR_check_NO_no_sigma_age, echo=FALSE}
+model.NO.no.modelled.sigma.noage.SR <- gamlss(SR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
+                                              data=info.rate.data.for.age, 
+                                              family=NO(mu.link="identity"),
+                                              control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.no.modelled.sigma.age.SR <- gamlss(SR ~ 1 + Sex * Age + random(Text) + random(Language) + random(Speaker), 
+                                            data=info.rate.data.for.age, 
+                                            family=NO(mu.link="identity"),
+                                            control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.no.modelled.sigma.age.noint.SR <- gamlss(SR ~ 1 + Sex + Age + random(Text) + random(Language) + random(Speaker), 
+                                                  data=info.rate.data.for.age, 
+                                                  family=NO(mu.link="identity"),
+                                                  control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+#summary(model.NO.no.modelled.sigma.noage.SR);
+#summary(model.NO.no.modelled.sigma.age.SR);
+#summary(model.NO.no.modelled.sigma.age.noint.SR);
+
+plot(model.NO.no.modelled.sigma.age.SR);
+wp(model.NO.no.modelled.sigma.age.SR, ylim.all=0.8);
+```
+
+The model including *Age* * *Sex* is:
+```{r echo=FALSE}
+summary(model.NO.no.modelled.sigma.age.SR);
+```
+
+The compared models are:
+
+| Model         | Deviance                                                                    | AIC                                                       |
+|---------------|-----------------------------------------------------------------------------|-----------------------------------------------------------|
+| *Age* * *Sex* | `r round(deviance(model.NO.no.modelled.sigma.age.SR,  what = "G"),1)`       | `r round(AIC(model.NO.no.modelled.sigma.age.SR),1)`       |
+| *Age* + *Sex* | `r round(deviance(model.NO.no.modelled.sigma.age.noint.SR,  what = "G"),1)` | `r round(AIC(model.NO.no.modelled.sigma.age.noint.SR),1)` |
+| *Sex*         | `r round(deviance(model.NO.no.modelled.sigma.noage.SR,  what = "G"),1)`     | `r round(AIC(model.NO.no.modelled.sigma.noage.SR),1)`     |
+
+So, even if *Age* has a significant (negative) effect and interaction with *Sex* (positive for males), adding it does not seem to be warranted here...
+
+
+###### Modelled *&sigma;* 
+
+```{r SR_check_NO_age, echo=FALSE}
+model.NO.noage.SR <- gamlss(SR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
+                            sigma.fo = ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
+                            data=info.rate.data.for.age, 
+                            family=NO(mu.link="identity"), 
+                            control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.age.SR <- gamlss(SR ~ 1 + Sex * Age + random(Text) + random(Language) + random(Speaker), 
+                          sigma.fo = ~ 1 + Sex * Age + random(Text) + random(Language) + random(Speaker), 
+                          data=info.rate.data.for.age, 
+                          family=NO(mu.link="identity"), 
+                          control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.age.noint.SR <- gamlss(SR ~ 1 + Sex + Age + random(Text) + random(Language) + random(Speaker), 
+                                sigma.fo = ~ 1 + Sex + Age + random(Text) + random(Language) + random(Speaker), 
+                                data=info.rate.data.for.age, 
+                                family=NO(mu.link="identity"), 
+                                control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+
+#summary(model.NO.noage.SR);
+#summary(model.NO.age.SR);
+#summary(model.NO.age.noint.SR);
+
+plot(model.NO.age.SR)
+wp(model.NO.age.SR, ylim.all=0.4)
+```
+
+The model including *Age* * *Sex* is:
+```{r echo=FALSE}
+summary(model.NO.age.SR);
+```
+
+The compared models are:
+
+| Model         | Deviance                                                  | AIC                                     |
+|---------------|-----------------------------------------------------------|-----------------------------------------|
+| *Age* * *Sex* | `r round(deviance(model.NO.age.SR,  what = "G"),1)`       | `r round(AIC(model.NO.age.SR),1)`       |
+| *Age* + *Sex* | `r round(deviance(model.NO.age.noint.SR,  what = "G"),1)` | `r round(AIC(model.NO.age.noint.SR),1)` |
+| *Sex*         | `r round(deviance(model.NO.noage.SR,  what = "G"),1)`     | `r round(AIC(model.NO.noage.SR),1)`     |
+
+So, even if *Age* has a significant (negative) effect (but no interaction with *Sex*), adding it does not seem to be warranted here either...
+
+The distribution of the residuals is less heteroscedastic than before and the fit to the data better.
+
+##### Summary
+
+Thus, for *SR*, even if there is a hint that *Age* might affect it negatively (and there might also be an interaction with *Sex* with a positive effect for males), overall, the various fit indices do not warrant its inclusion in the GAMLSS models.
+
+
+#### IR
+
+##### Fixed or modelled *&sigma;* (variance)
+
+###### Fixed *&sigma;* 
+
+```{r IR_check_NO_no_sigma_age, echo=FALSE}
+model.NO.no.modelled.sigma.noage.IR <- gamlss(IR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
+                                              data=info.rate.data.for.age, 
+                                              family=NO(mu.link="identity"),
+                                              control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.no.modelled.sigma.age.IR <- gamlss(IR ~ 1 + Sex * Age + random(Text) + random(Language) + random(Speaker), 
+                                            data=info.rate.data.for.age, 
+                                            family=NO(mu.link="identity"),
+                                            control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.no.modelled.sigma.age.noint.IR <- gamlss(IR ~ 1 + Sex + Age + random(Text) + random(Language) + random(Speaker), 
+                                                  data=info.rate.data.for.age, 
+                                                  family=NO(mu.link="identity"),
+                                                  control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+#summary(model.NO.no.modelled.sigma.noage.IR);
+#summary(model.NO.no.modelled.sigma.age.IR);
+#summary(model.NO.no.modelled.sigma.age.noint.IR);
+
+plot(model.NO.no.modelled.sigma.age.IR);
+wp(model.NO.no.modelled.sigma.age.IR, ylim.all=0.8);
+```
+
+The model including *Age* * *Sex* is:
+```{r echo=FALSE}
+summary(model.NO.no.modelled.sigma.age.IR);
+```
+
+The compared models are:
+
+| Model         | Deviance                                                                    | AIC                                                       |
+|---------------|-----------------------------------------------------------------------------|-----------------------------------------------------------|
+| *Age* * *Sex* | `r round(deviance(model.NO.no.modelled.sigma.age.IR,  what = "G"),1)`       | `r round(AIC(model.NO.no.modelled.sigma.age.IR),1)`       |
+| *Age* + *Sex* | `r round(deviance(model.NO.no.modelled.sigma.age.noint.IR,  what = "G"),1)` | `r round(AIC(model.NO.no.modelled.sigma.age.noint.IR),1)` |
+| *Sex*         | `r round(deviance(model.NO.no.modelled.sigma.noage.IR,  what = "G"),1)`     | `r round(AIC(model.NO.no.modelled.sigma.noage.IR),1)`     |
+
+So, even if *Age* has a significant (negative) effect and interaction with *Sex* (positive for males) -- interestingly, in this case the main effect of *Sex* disappears --, adding it does not seem to be warranted...
+
+
+###### Modelled *&sigma;* 
+
+```{r IR_check_NO_age, echo=FALSE}
+model.NO.noage.IR <- gamlss(IR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
+                            sigma.fo = ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
+                            data=info.rate.data.for.age, 
+                            family=NO(mu.link="identity"), 
+                            control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.age.IR <- gamlss(IR ~ 1 + Sex * Age + random(Text) + random(Language) + random(Speaker), 
+                          sigma.fo = ~ 1 + Sex * Age + random(Text) + random(Language) + random(Speaker), 
+                          data=info.rate.data.for.age, 
+                          family=NO(mu.link="identity"), 
+                          control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.age.noint.IR <- gamlss(IR ~ 1 + Sex + Age + random(Text) + random(Language) + random(Speaker), 
+                                sigma.fo = ~ 1 + Sex + Age + random(Text) + random(Language) + random(Speaker), 
+                                data=info.rate.data.for.age, 
+                                family=NO(mu.link="identity"), 
+                                control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+
+#summary(model.NO.noage.IR);
+#summary(model.NO.age.IR);
+#summary(model.NO.age.noint.IR);
+
+plot(model.NO.age.IR)
+wp(model.NO.age.IR, ylim.all=0.4)
+```
+
+The model including *Age* * *Sex* is:
+```{r echo=FALSE}
+summary(model.NO.age.IR);
+```
+
+The compared models are:
+
+| Model         | Deviance                                                  | AIC                                     |
+|---------------|-----------------------------------------------------------|-----------------------------------------|
+| *Age* * *Sex* | `r round(deviance(model.NO.age.IR,  what = "G"),1)`       | `r round(AIC(model.NO.age.IR),1)`       |
+| *Age* + *Sex* | `r round(deviance(model.NO.age.noint.IR,  what = "G"),1)` | `r round(AIC(model.NO.age.noint.IR),1)` |
+| *Sex*         | `r round(deviance(model.NO.noage.IR,  what = "G"),1)`     | `r round(AIC(model.NO.noage.IR),1)`     |
+
+So, even if *Age* has a significant (negative) effect and interaction with *Sex* (positive for males) -- interestingly, in this case the main effect of *Sex* disappears --, adding it does not seem to be warranted...
+
+The distribution of the residuals is less heteroscedastic than before and the fit to the data better.
+
+##### Summary
+
+Thus, while for *IR* the hint that *Age* has a negative main effect and interacts with *Sex* (with a positive effect for males, containing the whole effect of *Sex*) is much stronger, the various fit indices do not warrant its inclusion in the GAMLSS models.
+
+
+### Modelling the relationship between SR and ID
+
+```{r SR_ID_gamlss_age, echo=FALSE}
+model.NO.SR.ID.age <- gamlss(SR ~ 1 + ID + Sex * Age + random(Text) + random(Speaker), 
+                             sigma.fo = ~ 1 + ID + Sex * Age + random(Text) + random(Speaker), 
+                             data=info.rate.data.for.age, 
+                             family=NO(mu.link="identity"), 
+                             control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+model.NO.SR.ID.age.noint <- gamlss(SR ~ 1 + ID + Sex + Age + random(Text) + random(Speaker), 
+                             sigma.fo = ~ 1 + ID + Sex + Age + random(Text) + random(Speaker), 
+                             data=info.rate.data.for.age, 
+                             family=NO(mu.link="identity"), 
+                             control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+model.NO.SR.ID.noage <- gamlss(SR ~ 1 + ID + Sex + random(Text) + random(Speaker), 
+                             sigma.fo = ~ 1 + ID + Sex + random(Text) + random(Speaker), 
+                             data=info.rate.data.for.age, 
+                             family=NO(mu.link="identity"), 
+                             control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+
+#summary(model.NO.SR.ID.age)
+#summary(model.NO.SR.ID.age.noint)
+#summary(model.NO.SR.ID.noage)
+
+plot(model.NO.SR.ID.age)
+wp(model.NO.SR.ID.age, ylim.all=0.5)
+```
+
+The model including *Age* * *Sex* is:
+```{r echo=FALSE}
+summary(model.NO.SR.ID.age);
+```
+
+The compared models are:
+
+| Model         | Deviance                                                  | AIC                                     |
+|---------------|-----------------------------------------------------------|-----------------------------------------|
+| *Age* * *Sex* | `r round(deviance(model.NO.SR.ID.age,  what = "G"),1)`       | `r round(AIC(model.NO.SR.ID.age),1)`       |
+| *Age* + *Sex* | `r round(deviance(model.NO.SR.ID.age.noint,  what = "G"),1)` | `r round(AIC(model.NO.SR.ID.age.noint),1)` |
+| *Sex*         | `r round(deviance(model.NO.SR.ID.noage,  what = "G"),1)`     | `r round(AIC(model.NO.SR.ID.noage),1)`     |
+
+Clearly, adding *Age* is not warranted here...
+
+As above, we also looked a the simple lmer model:
+
+```{r SR_ID_lmer_age, echo=FALSE}
+lmer.SR.ID.age <- lmer(SR ~ 1 + ID + Sex * Age + (1 | Text) + (1 | Speaker), data=info.rate.data.for.age)
+lmer.SR.ID.age.noint <- lmer(SR ~ 1 + ID + Sex + Age + (1 | Text) + (1 | Speaker), data=info.rate.data.for.age)
+lmer.SR.ID.noage <- lmer(SR ~ 1 + ID + Sex + (1 | Text) + (1 | Speaker), data=info.rate.data.for.age)
+```
+
+The compared models are:
+
+| Model         | AIC                                    |
+|---------------|----------------------------------------|
+| *Age* * *Sex* | `r round(AIC(lmer.SR.ID.age),1)`       |
+| *Age* + *Sex* | `r round(AIC(lmer.SR.ID.age.noint),1)` |
+| *Sex*         | `r round(AIC(lmer.SR.ID.noage),1)`     |
+
+Interestingly, here the best model (as suggested by AIC) is the one with both *Age* and *Sex* (but no interaaction), but, as can be seen below, actually the effect of *Age* is *not significant* (*p* = `r round(summary(lmer.SR.ID.age.noint)$coefficients["Age","Pr(>|t|)"],3)`), suggesting that, in fact, the best model is still the one not including *Age*:
+```{r echo=FALSE}
+summary(lmer.SR.ID.age.noint);
+```
+
+### Conclusions about *Age*
+
+Within the limits of our reduced dataset (containing only `r tmp <- unique(info.rate.data[,c("Speaker","Age")]); sum(!is.na(tmp$Age))` speakers with *Age* info), we found the following:
+
+When modelling *SR* and *IR* with *GAMLSS*, while there are hints that *Age* has, for both, overall:
+  
+  - a **negative** main effect (i.e., *older* speakers of both sexes are *slower* and transmit *less information* per unit time across texts and languages), and
+  - an **interaction** with *Sex* (*positive* for *males*, i.e., males are *less negatively affected* by age that females across texts and languages),
+    
+it does *not* seem warranted to include it in these models.
+  
+When modelling the *relationship* between *SR* and *ID*, this *negative relationship*:
+
+  - seems **strengthened** with increasing *Age* (i.e., older speakers of both sexes shows a stronger negative relationship between *SR* and *ID*), and 
+  - there is an **interaction** with *Sex* (for females, this effect of *Age* is stronger than for males), 
+  
+but, alas, the inclusion of *Age* is not warranted in the *GAMLSS model*, nor (really) in the simpler *LMER model*.
+
+Thus, while *Age* seems to **negatively influence** (in a **sex-dependent manner**) both *SR* and *IR*, as well as **strengthen** the *negative relationship* between them, its effects are **far from clear** in the current dataset.
 
 
 ## Mixture of Gaussians
