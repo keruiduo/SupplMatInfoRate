@@ -39,7 +39,7 @@ dir.create("./figures", showWarnings=FALSE); # figures are saved here
 
 do.expensive.computations = FALSE; # force the expensive computations
 
-no.cores <- max(c(detectCores()-2, 1), na.rm=TRUE); # use less than 2 of the cores in the system (this includes hyperthreded ones)
+no.cores <- max(c(detectCores()-1, 1), na.rm=TRUE); # use less than 2 of the cores in the system (this includes hyperthreded ones)
 
 options(width = 250);
 options(contrasts=c("contr.treatment","contr.poly"));
@@ -193,8 +193,12 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 
 ```{r loading_data, echo=FALSE, message=FALSE, warning=FALSE}
 # Loading and preparing the data:
-
 info.rate.data <- read.table("./InfoRateData.csv", header=TRUE, sep="\t", quote="", stringsAsFactors=FALSE);
+
+# Compute Speech Rate (SR), Shannon Information Rate (ShIR), and Conditional Information Rate (IR):
+info.rate.data$SR   <- (info.rate.data$NS / info.rate.data$Duration);
+info.rate.data$ShIR <- (info.rate.data$SR * info.rate.data$ShE);
+info.rate.data$IR   <- (info.rate.data$SR * info.rate.data$ID);
 
 # Add language family data:
 info.rate.data$Family <- Vectorize(function(a) # assign language family to langauge codes
