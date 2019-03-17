@@ -976,7 +976,7 @@ ir.sex.age.lmer <-lmer(IR ~ Age * Sex + (1 | Text) + (1 | Language), data=info.r
 summary(ir.sex.age.lmer);
 ```
 
-So, it seems * Age* and *Sex* are both worth including in our models (even if we have to discard quite a bit of data because of missing *Age* info).
+So, it seems *Age* and *Sex* are both worth including in our models (even if we have to discard quite a bit of data because of missing *Age* info).
 (In fact, the effect of *Age* seems more significant than that of *Sex*.)
 
 In the following, we investigate if *Age* does matter when using GAMLSS modelling...
@@ -1234,9 +1234,9 @@ The compared models are:
 | *Age* + *Sex* | `r round(AIC(lmer.SR.ID.age.noint),1)` |
 | *Sex*         | `r round(AIC(lmer.SR.ID.noage),1)`     |
 
-Interestingly, here the best model (as suggested by AIC) is the one with both *Age* and *Sex* (but no interaaction), but, as can be seen below, actually the effect of *Age* is *not significant* (*p* = `r round(summary(lmer.SR.ID.age.noint)$coefficients["Age","Pr(>|t|)"],3)`), suggesting that, in fact, the best model is still the one not including *Age*:
+The best model is still the one not including *Age*:
 ```{r echo=FALSE}
-summary(lmer.SR.ID.age.noint);
+summary(lmer.SR.ID.noage);
 ```
 
 ### Conclusions about *Age*
