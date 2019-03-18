@@ -1336,6 +1336,21 @@ but, alas, the inclusion of *Age* is not warranted in the *GAMLSS model*, nor (r
 Thus, while *Age* seems to **negatively influence** (in a **sex-dependent manner**) both *SR* and *IR*, as well as **strengthen** the *negative relationship* between them, its effects are **far from clear** in the current dataset.
 
 
+## Is there any relationship between *ID*, *Age* and *Sex*?
+
+Here we test the hypothesis that *ID* is confounded by *Age* and *Sex* structure between languages:
+
+```{r ID_age_sex, echo=FALSE}
+model.ID.age.sex <- lmer(ID ~ 1 + Sex * Age + (1 | Family), data=info.rate.data.for.age);
+model.ID.age     <- update(model.ID.age.sex, . ~ . - Sex:Age - Sex); anova(model.ID.age, model.ID.age.sex);
+model.ID         <- update(model.ID.age, . ~ . - Age); anova(model.ID, model.ID.age.sex);
+
+summary(model.ID.age.sex);
+```
+
+Thus, there does not seem to be aby relationship between *ID*, *Age* and *Sex*.
+
+
 ## Mixture of Gaussians
 
 In what follows, mixing probabilities are independent from factors such as Sex.
