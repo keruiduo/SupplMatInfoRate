@@ -226,10 +226,18 @@ info.rate.data$Family <- Vectorize(function(a) # assign language family to langa
 }, "a")(as.character(info.rate.data$Language));
 
 # Convert to factors:
-info.rate.data$Text <- as.factor(info.rate.data$Text)
-info.rate.data$Speaker <- as.factor(info.rate.data$Speaker)
-info.rate.data$Language <- as.factor(info.rate.data$Language)
-info.rate.data$Sex <- as.factor(info.rate.data$Sex)
+info.rate.data$Text <- as.factor(info.rate.data$Text);
+info.rate.data$Speaker <- as.factor(info.rate.data$Speaker);
+info.rate.data$Language <- as.factor(info.rate.data$Language);
+info.rate.data$Sex <- as.factor(info.rate.data$Sex);
+info.rate.data$Family <- as.factor(info.rate.data$Family);
+
+# Make sure we use contrasts to the overall mean for factors:
+contrasts(info.rate.data$Text) <- contr.sum(length(levels(info.rate.data$Text)));
+contrasts(info.rate.data$Speaker) <- contr.sum(length(levels(info.rate.data$Speaker)));
+contrasts(info.rate.data$Language) <- contr.sum(length(levels(info.rate.data$Language)));
+contrasts(info.rate.data$Sex) <- contr.sum(length(levels(info.rate.data$Sex)));
+contrasts(info.rate.data$Family) <- contr.sum(length(levels(info.rate.data$Family)));
 ```
 
 
@@ -243,6 +251,7 @@ This `Rmarkdown` script (and corresponding TAB-separated CSV input data file `In
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 # Transform it into the long format:
 info.rate.data.long <- melt(info.rate.data, id.vars=c("Language", "Text", "Speaker", "Sex", "Family"));
+
 # Extract speakers, languages and texts:
 speakers <- sort(unique(info.rate.data$Speaker)); 
 languages <- sort(unique(info.rate.data$Language)); 
@@ -312,7 +321,17 @@ The data is structured as follows:
   - *SR* is the speech rate (syllables/second) for a given text spoken by a given speaker;
   - *ShE* (resp. *ID*) is the first-order (resp. second-order) language-level entropy estimate;
   - *ShIR* and *IR* are text * speaker properties obtained by multiplying *SR* by *ShE* and *ID* respectively.
-  
+
+
+### Technical notes on regressions
+
+We use throughout *sum contrasts* for the factor IVs, which are orthogonal contrasts which compare every level of the IV to the overall mean (for example, for a two-levels factor such as *Sex* we do not compare *Males* with *Females* but each with their overall mean, which is included in the intercept).
+However, in `R` the `contr.sum()` function used to define this contrasts produces level names that are very uninformative, so we explicit these below (please note that in the model outputs the *last* level is usually not shown):
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+for( tmp in c("Sex", "Text", "Language", "Family") ) cat(paste0("  - ***",tmp,"***: ",paste0("`",tmp,1:length(levels(info.rate.data[,tmp])),"` = *",levels(info.rate.data[,tmp]),"*", collapse=", "), " (the last level, `",tmp, length(levels(info.rate.data[,tmp])),"` is usually not displayed);\n"));
+```
+
 
 ### Exploratory plots and summaries
 
@@ -912,12 +931,12 @@ getSmo(model.NO.IR, "sigma", which = 3)
 
 ## Modelling the relationship between SR and ID
 
-Let's model SR with ID as an additional predictor (fixed effect).
-*N.B.* In this case, we must drop Language as a random effect, since each language has, by definition, only one value of ID.
+Let's model *SR* with *ID* as an additional predictor (fixed effect) interacting with *Sex*.
+*N.B.* In this case, we must drop *Language* as a random effect, since each language has, by definition, only one value of *ID.*
 
 ```{r SR_ID_gamlss, echo=FALSE}
 d <- info.rate.data[,c("SR","ID","Sex","Text","Speaker")]; # use only the columns we actually need (avoid errors about NAs in other columns)
-model.NO.SR.ID <- gamlss(SR ~ 1 + ID + Sex + random(Text) + random(Speaker), 
+model.NO.SR.ID <- gamlss(SR ~ 1 + ID * Sex + random(Text) + random(Speaker), 
                          sigma.fo = ~ 1 + ID + Sex + random(Text) + random(Speaker), 
                          data=d, 
                          family=NO(mu.link="identity"), 
@@ -930,12 +949,13 @@ cat("\nDeviance=",deviance(model.NO.SR.ID,  what = "G"),"\n");
 cat("\nAIC=",AIC(model.NO.SR.ID),"\n");
 ```
 
-Adding ID as a predictor improves the fits (as judged by AIC).
+Adding *ID* as a predictor improves the fits (as judged by AIC).
 There is a negative estimate for ID, but significance is difficult to assess with GAMLSS model involving smoothing functions.
-However, also using a simple lmer model we have a significant effect of ID:
+However, also using a simple `lmer` model we have a significant effect of *ID*:
 
 ```{r SR_ID_lmer, echo=FALSE}
-lmer.SR.ID <- lmer(SR ~ 1 + ID + Sex + (1 | Text) + (1 | Speaker), data=info.rate.data)
+lmer.SR.ID <- lmer(SR ~ 1 + ID * Sex + (1 | Text) + (1 | Speaker), data=info.rate.data)
+summary(lmer.SR.ID)
 anova(lmer.SR.ID)
 ```
 
@@ -990,6 +1010,12 @@ To make comparability possible, we also fit the same models but without *Age* on
 ```{r subselect the dataset contaning only the relevant info (including Age), echo=FALSE}
 info.rate.data.for.age <- subset(info.rate.data[,c("SR","IR","ID","Sex","Text","Language","Speaker","Age")], !is.na(Age)); # use only the columns we actually need (and remove the NAs)
 info.rate.data.for.age[] <- lapply(info.rate.data.for.age, function(x) if(is.factor(x)) factor(x) else x); # and make sure the factors don't have left-over levels
+# Make sure we use contrasts to the overall mean for factors:
+contrasts(info.rate.data.for.age$Text) <- contr.sum(length(levels(info.rate.data.for.age$Text)));
+contrasts(info.rate.data.for.age$Speaker) <- contr.sum(length(levels(info.rate.data.for.age$Speaker)));
+contrasts(info.rate.data.for.age$Language) <- contr.sum(length(levels(info.rate.data.for.age$Language)));
+contrasts(info.rate.data.for.age$Sex) <- contr.sum(length(levels(info.rate.data.for.age$Sex)));
+#contrasts(info.rate.data.for.age$Family) <- contr.sum(length(levels(info.rate.data.for.age$Family)));
 ```
 
 #### SR
@@ -1184,13 +1210,28 @@ model.NO.SR.ID.age <- gamlss(SR ~ 1 + ID + Sex * Age + random(Text) + random(Spe
                              data=info.rate.data.for.age, 
                              family=NO(mu.link="identity"), 
                              control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+model.NO.SR.ID.age.i <- gamlss(SR ~ 1 + ID * Sex * Age + random(Text) + random(Speaker), 
+                             sigma.fo = ~ 1 + ID * Sex * Age + random(Text) + random(Speaker), 
+                             data=info.rate.data.for.age, 
+                             family=NO(mu.link="identity"), 
+                             control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
 model.NO.SR.ID.age.noint <- gamlss(SR ~ 1 + ID + Sex + Age + random(Text) + random(Speaker), 
                              sigma.fo = ~ 1 + ID + Sex + Age + random(Text) + random(Speaker), 
                              data=info.rate.data.for.age, 
                              family=NO(mu.link="identity"), 
                              control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+model.NO.SR.ID.age.noint.i <- gamlss(SR ~ 1 + ID * Sex + Age + random(Text) + random(Speaker), 
+                             sigma.fo = ~ 1 + ID * Sex + Age + random(Text) + random(Speaker), 
+                             data=info.rate.data.for.age, 
+                             family=NO(mu.link="identity"), 
+                             control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
 model.NO.SR.ID.noage <- gamlss(SR ~ 1 + ID + Sex + random(Text) + random(Speaker), 
                              sigma.fo = ~ 1 + ID + Sex + random(Text) + random(Speaker), 
+                             data=info.rate.data.for.age, 
+                             family=NO(mu.link="identity"), 
+                             control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+model.NO.SR.ID.noage.i <- gamlss(SR ~ 1 + ID * Sex + random(Text) + random(Speaker), 
+                             sigma.fo = ~ 1 + ID * Sex + random(Text) + random(Speaker), 
                              data=info.rate.data.for.age, 
                              family=NO(mu.link="identity"), 
                              control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
@@ -1210,29 +1251,38 @@ summary(model.NO.SR.ID.age);
 
 The compared models are:
 
-| Model         | Deviance                                                  | AIC                                     |
-|---------------|-----------------------------------------------------------|-----------------------------------------|
-| *Age* * *Sex* | `r round(deviance(model.NO.SR.ID.age,  what = "G"),1)`       | `r round(AIC(model.NO.SR.ID.age),1)`       |
-| *Age* + *Sex* | `r round(deviance(model.NO.SR.ID.age.noint,  what = "G"),1)` | `r round(AIC(model.NO.SR.ID.age.noint),1)` |
-| *Sex*         | `r round(deviance(model.NO.SR.ID.noage,  what = "G"),1)`     | `r round(AIC(model.NO.SR.ID.noage),1)`     |
+| Model                | Deviance                                                       | AIC                                          |
+|----------------------|----------------------------------------------------------------|----------------------------------------------|
+| *ID* * *Sex* * *Age* | `r round(deviance(model.NO.SR.ID.age.i,  what = "G"),1)`       | `r round(AIC(model.NO.SR.ID.age.i),1)`       |
+| *ID* + *Sex* * *Age* | `r round(deviance(model.NO.SR.ID.age,  what = "G"),1)`         | `r round(AIC(model.NO.SR.ID.age),1)`         |
+| *ID* * *Sex* + *Age* | `r round(deviance(model.NO.SR.ID.age.noint.i,  what = "G"),1)` | `r round(AIC(model.NO.SR.ID.age.noint.i),1)` |
+| *ID* + *Sex* + *Age* | `r round(deviance(model.NO.SR.ID.age.noint,  what = "G"),1)`   | `r round(AIC(model.NO.SR.ID.age.noint),1)`   |
+| *ID* * *Sex*         | `r round(deviance(model.NO.SR.ID.noage.i,  what = "G"),1)`     | `r round(AIC(model.NO.SR.ID.noage.i),1)`     |
+| *ID* + *Sex*         | `r round(deviance(model.NO.SR.ID.noage,  what = "G"),1)`       | `r round(AIC(model.NO.SR.ID.noage),1)`       |
 
-Clearly, adding *Age* is not warranted here...
+Clearly, adding *Age* is not warranted here (as is the interaction between *ID* and *Sex*)...
 
 As above, we also looked a the simple lmer model:
 
 ```{r SR_ID_lmer_age, echo=FALSE}
 lmer.SR.ID.age <- lmer(SR ~ 1 + ID + Sex * Age + (1 | Text) + (1 | Speaker), data=info.rate.data.for.age)
+lmer.SR.ID.age.i <- lmer(SR ~ 1 + ID * Sex * Age + (1 | Text) + (1 | Speaker), data=info.rate.data.for.age)
 lmer.SR.ID.age.noint <- lmer(SR ~ 1 + ID + Sex + Age + (1 | Text) + (1 | Speaker), data=info.rate.data.for.age)
+lmer.SR.ID.age.noint.i <- lmer(SR ~ 1 + ID * Sex + Age + (1 | Text) + (1 | Speaker), data=info.rate.data.for.age)
 lmer.SR.ID.noage <- lmer(SR ~ 1 + ID + Sex + (1 | Text) + (1 | Speaker), data=info.rate.data.for.age)
+lmer.SR.ID.noage.i <- lmer(SR ~ 1 + ID * Sex + (1 | Text) + (1 | Speaker), data=info.rate.data.for.age)
 ```
 
 The compared models are:
 
-| Model         | AIC                                    |
-|---------------|----------------------------------------|
-| *Age* * *Sex* | `r round(AIC(lmer.SR.ID.age),1)`       |
-| *Age* + *Sex* | `r round(AIC(lmer.SR.ID.age.noint),1)` |
-| *Sex*         | `r round(AIC(lmer.SR.ID.noage),1)`     |
+| Model                | AIC                                      |
+|----------------------|------------------------------------------|
+| *ID* * *Sex* * *Age* | `r round(AIC(lmer.SR.ID.age.i),1)`       |
+| *ID* + *Sex* * *Age* | `r round(AIC(lmer.SR.ID.age),1)`         |
+| *ID* * *Sex* + *Age* | `r round(AIC(lmer.SR.ID.age.noint.i),1)` |
+| *ID* + *Sex* + *Age* | `r round(AIC(lmer.SR.ID.age.noint),1)`   |
+| *ID* * *Sex*         | `r round(AIC(lmer.SR.ID.noage.i),1)`     |
+| *ID* + *Sex*         | `r round(AIC(lmer.SR.ID.noage),1)`       |
 
 The best model is still the one not including *Age*:
 ```{r echo=FALSE}
