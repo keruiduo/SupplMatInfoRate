@@ -1,8 +1,8 @@
 ---
-title: "Human languages share an optimal information transmission rate"
+title: "Different languages, similar encoding efficiency"
 subtitle: "Full statistical analysis and plots"
-author: "Christophe Coupé, Dan Dediu and François Pellegrino"
-date: '`r Sys.time()`'
+author: "Christophe Coupé, Yoon Mi Oh, Dan Dediu and François Pellegrino"
+date: '`r date()`'
 output:
   html_document:
     fig_caption: yes
@@ -18,14 +18,15 @@ editor_options:
 
 ```{r setup, echo=F, message=F, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(ggplot2)
-library(reshape2)
-library(plyr)
-library(lmerTest)
-library(gamlss)
-library(gamlss.mx)
-library(sjstats)
-library(sjPlot)
+library(ggplot2);
+library(ggrepel);
+library(reshape2);
+library(plyr);
+library(lmerTest);
+library(gamlss);
+library(gamlss.mx);
+library(sjstats);
+library(sjPlot);
 library(moments);
 library(parallel);
 library(pander);
@@ -39,7 +40,7 @@ dir.create("./figures", showWarnings=FALSE); # figures are saved here
 
 do.expensive.computations = FALSE; # force the expensive computations
 
-no.cores <- max(c(detectCores()-1, 1), na.rm=TRUE); # use less than 2 of the cores in the system (this includes hyperthreded ones)
+no.cores <- ifelse(.Platform$OS.type == "windows", 1, max(detectCores()-1, 1, na.rm=TRUE)); # use all cores in the system except 1 (including hyperthreading), except on Windows, were this defaults to 1 core
 
 options(width = 250);
 options(contrasts=c("contr.treatment","contr.poly"));
@@ -200,6 +201,11 @@ info.rate.data$SR   <- (info.rate.data$NS / info.rate.data$Duration);
 info.rate.data$ShIR <- (info.rate.data$SR * info.rate.data$ShE);
 info.rate.data$IR   <- (info.rate.data$SR * info.rate.data$ID);
 
+# Add NS(VIE) / NS(L) for each language L and text T:
+info.rate.data <- merge(info.rate.data, unique(info.rate.data[info.rate.data$Language=="VIE", c("Text", "NS")]), by="Text", suffixes=c("",".y"), all.x=TRUE);
+names(info.rate.data)[ncol(info.rate.data)] <- "NSVR";
+info.rate.data$NSVR <- info.rate.data$NSVR / info.rate.data$NS;
+
 # Add language family data:
 info.rate.data$Family <- Vectorize(function(a) # assign language family to langauge codes
 {
@@ -238,12 +244,15 @@ contrasts(info.rate.data$Speaker) <- contr.sum(length(levels(info.rate.data$Spea
 contrasts(info.rate.data$Language) <- contr.sum(length(levels(info.rate.data$Language)));
 contrasts(info.rate.data$Sex) <- contr.sum(length(levels(info.rate.data$Sex)));
 contrasts(info.rate.data$Family) <- contr.sum(length(levels(info.rate.data$Family)));
+
+# Sort by Language, Speaker and Text:
+info.rate.data <- info.rate.data[order(info.rate.data$Language, info.rate.data$Speaker, info.rate.data$Text),];
 ```
 
 
 ## Introduction
 
-This `Rmarkdown` script (and corresponding TAB-separated CSV input data file `InfoRateData.csv` and the resulting `HTML` document) contain the full analysis and plotting code accompanying the paper *Human languages share an optimal information transmission rate*.
+This `Rmarkdown` script (and corresponding the TAB-separated CSV input data files `InfoRateData.csv` and `AutomaticSylDetect.csv`, and the resulting `HTML` document) contain the full analysis and plotting code accompanying the paper *Different languages, similar encoding efficiency: comparable information rates across the human communicative niche*.
 
 
 ## The data
@@ -274,6 +283,14 @@ Speakers were asked to read three times (first silently and then loudly twice) e
 The texts were presented one by one on the screen in random order, in a self-paced reading paradigm. 
 This way, speakers familiarized themselves with the text and reduce their reading errors.
 The second loud recording was analyzed in this study.
+
+With these, we the oral corpus contains `r nrow(info.rate.data)` texts read by `r length(speakers)` coming from `r length(languages)` languages and `r length(texts)` texts.
+
+For each language and text we have the following number of syllables (*NS*):
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+knitr::kable(unique(info.rate.data[,c("Language","Text","NS")]),
+             row.names=FALSE, caption="Number of syllables (*NS*) per language and text.");
+```
 
 ### Text Corpus
 
@@ -664,7 +681,7 @@ cor.test(info.rate.data$SR, info.rate.data$ID, method="spearman");
 
 
 
-## Linear Mixed Modells (LMMs)
+## Linear Mixed Models (LMMs)
 
 
 ### Linear ICCs
@@ -1348,7 +1365,70 @@ model.ID         <- update(model.ID.age, . ~ . - Age); anova(model.ID, model.ID.
 summary(model.ID.age.sex);
 ```
 
-Thus, there does not seem to be aby relationship between *ID*, *Age* and *Sex*.
+Thus, there does not seem to be any relationship between *ID*, *Age* and *Sex*.
+
+
+## Relationship between *ID* and the *syntagmatic density of information ratio* (SDIR)
+
+In our case, SDIR (versus *Vietnamese*) is reduced to the ratio between the number of syllables (*NS*) in *Vietnamese* to the *NS* in the language *L* for each *Text* separately; we denote this here also as *NSVR* (from "NS Vietnamese Ratio").
+
+### *SDIR* separately for each *Text* and *Language*
+
+```{r ID vs SDIR, message = FALSE, echo=FALSE, fig.width=9, fig.height=10, fig.cap="Syntagmatic density of information ratio *SDIR* (relative to Vietnamese) versus *ID* with LOESS smoother (black) and linear regression (yellow) and their 95%CIs."}
+# The data: just the Text-level info:
+d <- unique(info.rate.data[,c("Text", "Language", "Family", "ID", "NSVR")]);
+
+# Plot:
+ggplot(d, aes(x=ID, y=NSVR, color=Family)) + 
+  geom_point(alpha=0.50, size=1) + 
+  geom_smooth(method="lm", color="yellow") +
+  geom_smooth(method="loess", color="black") + 
+  geom_label_repel(aes(x=ID, y=x, label=Language, fill=Family), color="black", alpha=0.5, size=3, show.legend = FALSE, 
+                   data=aggregate(d$NSVR, by=d[c("ID","Language","Family")], max)) +
+  ylab("SDIR (relative to Vietnamese)") + xlab("ID") + 
+  theme(legend.position="bottom") +
+  NULL;
+```
+
+The "flat" correlations (Pearson and Spearman) between *SDIR* and *ID* are: 
+```{r message = FALSE, echo=FALSE}
+cor.test(d$NSVR, d$ID, method="pearson");
+cor.test(d$NSVR, d$ID, method="spearman");
+```
+
+The multi-level regression of *SDIR* on *ID* (with *Text* as random effect) and the *Text*'s ICC are:
+```{r message = FALSE, echo=FALSE}
+m0 <- lmer(NSVR ~ ID + (1 | Text), data=d);
+summary(m0);
+icc(m0);
+```
+
+### Average *SDIR* across *Text*s for each *Language*
+
+If we consider just the **average *SDIR* ** for each language:
+
+```{r ID vs average SDIR, message = FALSE, echo=FALSE, fig.width=9, fig.height=10, fig.cap="Average syntagmatic density of information ratio *SDIR* (relative to Vietnamese) versus *ID* with LOESS smoother (black) and linear regression (yellow) and their 95%CIs."}
+# The data: just the Text-level info:
+d <- unique(info.rate.data[,c("Text", "Language", "Family", "ID", "NSVR")]);
+d1 <- aggregate(d$NSVR, by=d[c("Language", "Family", "ID")], mean); names(d1)[ncol(d1)] <- "NSVR.mean";
+
+# Plot:
+ggplot(d1, aes(x=ID, y=NSVR.mean, color=Family)) + 
+  geom_point(alpha=0.50, size=1) + 
+  geom_smooth(method="lm", color="yellow") +
+  geom_smooth(method="loess", color="black") + 
+  geom_label_repel(aes(x=ID, y=NSVR.mean, label=Language, fill=Family), color="black", alpha=0.5, size=3, show.legend = FALSE) +
+  ylab("Average SDIR (relative to Vietnamese)") + xlab("ID") + 
+  theme(legend.position="bottom") +
+  NULL;
+
+cor.test(d1$NSVR.mean, d1$ID, method="pearson");
+cor.test(d1$NSVR.mean, d1$ID, method="spearman");
+
+m1 <- lm(NSVR.mean ~ ID, data=d1);
+summary(m1);
+```
+
 
 
 ## Mixture of Gaussians
@@ -2382,7 +2462,191 @@ pander(sessionInfo(), compact=TRUE);
 ```
 
 
-## Appendix II: Figures for the main paper
+## Appendix II: Speech Rate: Canonical vs. automatic detection
+
+Here we compare the Speech Rate (*SR*) used in paper and defined as the *canonical articulatory rate* (= the number of syllables corresponding to the canonical text pronunciation per second of speech) with an estimate of the *realized speech rate*, based on the *automatic detection* of syllable nuclei implemented by the popular algorithm described in De Jong, Nivja H., and Ton Wempe. "Praat script to detect syllable nuclei and measure speech rate automatically." Behavior research methods 41.2 (2009): 385-390.
+We used their algorithm with standard parameters (except for pauses which were retrieved from our manual annotation to match the main analysis) on the actual oral productions of our speakers, and the results are available in the TAB-separated CSV file `AutomaticSylDetect.csv` with the following structure:
+
+  - **soundname**: combination of Language, Text and Speaker info
+  - **nsyll**: number of syllables
+  - **npause**: number of pauses
+  - **dur**: total duration
+  - **phonationtime**: actual duration
+
+```{r read and parse automatic syllable detection, echo=FALSE, warning=FALSE, message=FALSE}
+# Load the automatic syllabification data:
+syll.data <- read.table("./AutomaticSylDetect.csv", header=TRUE, sep="\t", quote="", strip.white=TRUE, stringsAsFactors=FALSE);
+
+# Extract language and text (and keep the minimal speaker ID only):
+syll.data <- cbind(do.call(rbind, lapply(strsplit(syll.data$soundname,"_",fixed=TRUE), function(x)
+                    {
+                      if( length(x) >= 5 )
+                      {
+                        data.frame("Speaker"=paste0(x[1],"_",x[2],"(",x[3],")"), "Language"=toupper(x[1]), "Text"=toupper(x[5]));
+                      } else if( length(x) == 3 )
+                      {
+                        data.frame("Speaker"=paste0(x[1],"_",x[2]), "Language"=toupper(x[1]), "Text"=toupper(x[3])); # special case for DEU, ENG and ITA
+                      } else
+                      {
+                        stop("Possible error in the AutomaticSylDetect.csv file...\n");
+                      }
+                    })),
+                   "Duration"=syll.data$phonationtime, 
+                   "NS"=syll.data$nsyll
+                  );
+
+# Merge to the canonical SR data:
+syll.data <- merge(syll.data, info.rate.data, by=c("Speaker", "Language", "Text"), all.x=TRUE, suffixes=c(".auto",""));
+
+# Compute SR and IR:
+syll.data$SR.auto <- (syll.data$NS.auto / syll.data$Duration.auto);
+syll.data$IR.auto <- (syll.data$SR.auto * syll.data$ID);
+
+# Sort the data:
+syll.data$Language <- as.character(syll.data$Language);
+syll.data$Speaker <- as.character(syll.data$Speaker);
+syll.data$Text <- as.character(syll.data$Text);
+syll.data <- syll.data[ order(syll.data$Language, syll.data$Speaker, syll.data$Text), ];
+
+# Convert to factors:
+syll.data$Text     <- as.factor(syll.data$Text);
+syll.data$Speaker  <- as.factor(syll.data$Speaker);
+syll.data$Language <- as.factor(syll.data$Language);
+syll.data$Family   <- as.factor(syll.data$Family);
+syll.data$Sex      <- as.factor(syll.data$Sex);
+```
+
+### NS (# of syllables):
+
+Pearson's correlation and paired t-test:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+cor.test(syll.data$NS, syll.data$NS.auto, method="pearson");
+cor.test(syll.data$NS, syll.data$NS.auto, method="spearman");
+t.test(syll.data$NS, syll.data$NS.auto, paired=TRUE);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=7, fig.height=6, fig.cap="NS: canonical (x axis) vs automatic (y axis) overall (black) and separately by language (colored)."}
+ggplot(syll.data, aes(x=NS, y=NS.auto, color=Language)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE) + 
+  geom_smooth(aes(x=NS, y=NS.auto), color="black", method="lm", formula=y ~ x, se=FALSE);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=7, fig.height=6, fig.cap="NS: canonical (x axis) vs automatic (y axis) overall (black) and separately by text (colored)."}
+ggplot(syll.data, aes(x=NS, y=NS.auto, color=Text)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE) + 
+  geom_smooth(aes(x=NS, y=NS.auto), color="black", method="lm", formula=y ~ x, se=FALSE);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=15, fig.height=14, fig.cap="NS: canonical (x axis) vs automatic (y axis) separately by text and language."}
+ggplot(syll.data, aes(x=NS, y=NS.auto, color=Language)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE, color="black") +
+  facet_grid(Language ~ Text);
+```
+
+### SR (speech rate):
+
+Pearson's correlation and paired t-test:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+cor.test(syll.data$SR, syll.data$SR.auto, method="pearson");
+cor.test(syll.data$SR, syll.data$SR.auto, method="spearman");
+t.test(syll.data$SR, syll.data$SR.auto, paired=TRUE);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=7, fig.height=6, fig.cap="SR: canonical (x axis) vs automatic (y axis) overall (black) and separately by language (colored)."}
+ggplot(syll.data, aes(x=SR, y=SR.auto, color=Language)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE) + 
+  geom_smooth(aes(x=SR, y=SR.auto), color="black", method="lm", formula=y ~ x, se=FALSE);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=7, fig.height=6, fig.cap="SR: canonical (x axis) vs automatic (y axis) overall (black) and separately by text (colored)."}
+ggplot(syll.data, aes(x=SR, y=SR.auto, color=Text)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE) + 
+  geom_smooth(aes(x=SR, y=SR.auto), color="black", method="lm", formula=y ~ x, se=FALSE);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=15, fig.height=14, fig.cap="SR: canonical (x axis) vs automatic (y axis) separately by text and language."}
+ggplot(syll.data, aes(x=SR, y=SR.auto, color=Language)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE, color="black") +
+  facet_grid(Language ~ Text);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=13, fig.height=14, fig.cap="SR: canonical (x axis) vs automatic (y axis) separately by speaker."}
+ggplot(syll.data, aes(x=SR, y=SR.auto, color=Text)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE, color="black") +
+  facet_wrap(. ~ Speaker);
+```
+
+#### Canonical and automatic SR by language
+
+Plot, linear (mixed-effects) regression, correlation and paired t-tests:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=13, fig.height=14, fig.cap="SR: canonical (x axis) vs automatic (y axis) separately by language with regression line (black) and LOESS smoothing (yellow) and their 95%CIs."}
+ggplot(syll.data, aes(x=SR, y=SR.auto, color=Language)) +
+  geom_point(alpha=0.5) + 
+  geom_smooth(method="lm", formula=y ~ x, se=TRUE, color="black", alpha=0.5) + 
+  geom_smooth(method="loess", se=TRUE, color="yellow", alpha=0.5) + 
+  #geom_smooth(aes(x=SR, y=SR.auto), color="black", method="lm", formula=y ~ x, se=FALSE) + 
+  facet_wrap(. ~ Language) + 
+  xlab("SR (canonical)") + ylab("SR (automatic)");
+```
+
+**Across languages:**
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+m0 <- lmer(SR.auto ~ SR + (1 | Family/Language) + (1 | Text) + (1 | Speaker), data=syll.data); m0s <- summary(m0); print(m0s);
+icc(m0);
+r1 <- cor.test(syll.data$SR, syll.data$SR.auto, method="pearson"); #print(r1);
+r2 <- cor.test(syll.data$SR, syll.data$SR.auto, method="spearman"); #print(r2)
+t1 <- t.test(syll.data$SR, syll.data$SR.auto, paired=TRUE); #print(t1);
+
+# Collect the results:
+results <- data.frame("Language"="all",
+                      "r"=paste0("r=",sprintf("%.2f",r1$estimate), " (p=",sprintf("%.4g",r1$p.value),")"),
+                      "rho"=paste0("rho=",sprintf("%.2f",r2$estimate), " (p=",sprintf("%.4g",r2$p.value),")"),
+                      "t"=paste0("t(",sprintf("%.1f",t1$parameter),")=",sprintf("%.2f",t1$statistic), " (p=",sprintf("%.3g",t1$p.value),")"),
+                      "intercept"=paste0(sprintf("%.2f",m0s$coefficients["(Intercept)","Estimate"])," (p=",sprintf("%.3g",m0s$coefficients["(Intercept)","Pr(>|t|)"]),")"),
+                      "slope"=paste0(sprintf("%.2f",m0s$coefficients["SR","Estimate"])," (p=",sprintf("%.3g",m0s$coefficients["SR","Pr(>|t|)"]),")"));
+```
+
+**For each language separately:**
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+for( i in unique(syll.data$Language) )
+{
+  cat(paste0("\nFor *",i,"*\n\n"));
+  d <- syll.data[ syll.data$Language == i, ];
+  m0 <- lmer(SR.auto ~ SR + (1 | Text) + (1 | Speaker), data=d);
+  m0s <- summary(m0); print(m0s);
+  print(icc(m0));
+  r1 <- cor.test(d$SR, d$SR.auto, method="pearson"); #print(r1);
+  r2 <- cor.test(d$SR, d$SR.auto, method="spearman"); #print(r2);
+  t1 <- t.test(d$SR, d$SR.auto, paired=TRUE); #print(t1);
+  
+  # Collect the results:
+  results <- rbind(results,
+                   data.frame("Language"=i,
+                              "r"=paste0("r=",sprintf("%.2f",r1$estimate), " (p=",sprintf("%.4g",r1$p.value),")"),
+                              "rho"=paste0("rho=",sprintf("%.2f",r2$estimate), " (p=",sprintf("%.4g",r2$p.value),")"),
+                              "t"=paste0("t(",sprintf("%.1f",t1$parameter),")=",sprintf("%.2f",t1$statistic), " (p=",sprintf("%.3g",t1$p.value),")"),
+                              "intercept"=paste0(sprintf("%.2f",m0s$coefficients["(Intercept)","Estimate"])," (p=",sprintf("%.3g",m0s$coefficients["(Intercept)","Pr(>|t|)"]),")"),
+                              "slope"=paste0(sprintf("%.2f",m0s$coefficients["SR","Estimate"])," (p=",sprintf("%.3g",m0s$coefficients["SR","Pr(>|t|)"]),")")));
+}
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+knitr::kable(results, row.names=FALSE, 
+             col.names=c("Language", "Pearson's r", "Spearman's rho", "Paired t-test", "Intercept", "Slope"), 
+             caption="Correlations (Pearson's and Spearman's), paired t-test, and (mixed-effects, with Text, Speaker and, for the first row only, Language, as random effects) linear regression intercept and slope between automatic and canonical SR across all languages (top row) and for each language spearately).");
+```
+
+## Appendix III: Figures for the main paper
 
 Here we generate the figures used in the main paper (saved to the `./figures` folder as 600 DPI TIFF files `Figure-*.tiff`).
 
@@ -2439,6 +2703,28 @@ d <- pairwise.dists.long;
 ggboxplot(d[d$Method=="Jensen-Shannon",], x="Measure", y="Distance", color="Measure", fill="Measure", alpha=0.25) + ylab("Jensen-Shannon divergence") +
   stat_compare_means(comparisons=list(c("NS", "SR"), c("NS", "IR"), c("SR", "IR")), paired=TRUE, method="wilcox.test", p.adjust.method="bonferroni", label="p.signif") +
   theme(legend.position="none");
+dev.off();
+
+tiff("./figures/Figure-SDIR-vs-ID.tiff", width=6, height=7, units="in", compression="lzw", res=600, type="cairo");
+d <- unique(info.rate.data[,c("Text", "Language", "Family", "ID", "NSVR")]);
+ggplot(d, aes(x=ID, y=NSVR, color=Family)) + 
+  geom_point(alpha=0.50, size=1) + 
+  geom_smooth(method="lm", color="yellow") +
+  geom_smooth(method="loess", color="black") + 
+  geom_label_repel(aes(x=ID, y=x, label=Language, fill=Family), color="black", alpha=0.5, size=3, show.legend = FALSE, 
+                   data=aggregate(d$NSVR, by=d[c("ID","Language","Family")], max)) +
+  ylab("SDIR (relative to Vietnamese)") + xlab("ID") + theme(legend.position="bottom") +
+  NULL;
+dev.off();
+
+tiff("./figures/Figure-SR-can-vs-auto.tiff", width=7, height=8, units="in", compression="lzw", res=600, type="cairo");
+ggplot(syll.data, aes(x=SR, y=SR.auto, color=Language)) +
+  geom_point(alpha=0.5) + 
+  geom_smooth(method="lm", formula=y ~ x, se=TRUE, color="black", alpha=0.5) + 
+  #geom_smooth(method="loess", se=FALSE, color="yellow", alpha=0.5) + 
+  #geom_smooth(aes(x=SR, y=SR.auto), color="black", method="lm", formula=y ~ x, se=FALSE) + 
+  facet_wrap(. ~ Language) + 
+  xlab("SR (canonical)") + ylab("SR (automatic)") + theme(legend.position="bottom");
 dev.off();
 ```
 
