@@ -252,7 +252,7 @@ info.rate.data <- info.rate.data[order(info.rate.data$Language, info.rate.data$S
 
 ## Introduction
 
-This `Rmarkdown` script (and corresponding the TAB-separated CSV input data files `InfoRateData.csv` and `AutomaticSylDetect.csv`, and the resulting `HTML` document) contain the full analysis and plotting code accompanying the paper *Different languages, similar encoding efficiency: comparable information rates across the human communicative niche*.
+This `Rmarkdown` script (and the corresponding TAB-separated CSV input data files `InfoRateData.csv` and `AutomaticSylDetect.csv`, and the resulting `HTML` document) contains the full analysis and plotting code accompanying the paper *Different languages, similar encoding efficiency: comparable information rates across the human communicative niche*.
 
 
 ## The data
@@ -269,7 +269,7 @@ texts <- sort(unique(info.rate.data$Text));
 ```
 
 For more information on the data, please see [Oh (2015)](#references).
-There are in total `r length(unique(info.rate.data$Language))` languages (see the Table below).
+There are in total `r length(unique(info.rate.data$Language))` languages (see the table below).
 
 ### The Oral Corpus
 
@@ -279,12 +279,12 @@ The material consists of 15 short texts of 3-5 semantically connected sentences 
 For the other 14 languages, two of the authors supervised the translation and recording of new datasets. 
 All participants were native speakers of the target language, with a focus on a specific variety of the language when possible – e.g. *Mandarin* spoken in Beijing, *Serbian* in Belgrade and *Korean* in Seoul. 
 No strict control on age or on the speakers’ social diversity was performed, but speakers were mainly students or members of academic institutions.
-Speakers were asked to read three times (first silently and then loudly twice) each text. 
+Speakers were asked to read three or four times (first silently and then loudly two or three times) each text. 
 The texts were presented one by one on the screen in random order, in a self-paced reading paradigm. 
-This way, speakers familiarized themselves with the text and reduce their reading errors.
-The second loud recording was analyzed in this study.
+This way, speakers familiarized themselves with the text and reduced their reading errors.
+The last loud recording was analyzed in this study.
 
-With these, we the oral corpus contains `r nrow(info.rate.data)` texts read by `r length(speakers)` coming from `r length(languages)` languages and `r length(texts)` texts.
+With these, the oral corpus contains `r nrow(info.rate.data)` texts read by `r length(speakers)` speakers coming from `r length(languages)` languages and `r length(texts)` texts.
 
 For each language and text we have the following number of syllables (*NS*):
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
@@ -294,7 +294,7 @@ knitr::kable(unique(info.rate.data[,c("Language","Text","NS")]),
 
 ### Text Corpus
 
-Text datasets were acquired from various sources as illustrated in the Table below. 
+Text datasets were acquired from various sources as illustrated in the table below. 
 After an initial data curation, each dataset was phonetically transcribed and automatically syllabiﬁed by a rule-based program written by one of the authors, except in the following cases: 
 
   i) when syllabiﬁcation was already provided with the dataset (*English*, *French*, *German*, and *Vietnamese* for the multisyllabic words); 
@@ -313,7 +313,7 @@ Additionally, no syllabiﬁcation was required for Sino-Tibetan languages (*Cant
 | French           | Indo-European  | FRA       | Lexique 3.80 [(New et al., 2001)](#references)              |
 | German           | Indo-European  | DEU       | WebCelex (MPI for Psycholinguistics)                        |
 | Hungarian        | Uralic         | HUN       | Hungarian National Corpus [(Váradi, 2002)](#references)     |
-| Italian          | Indo-European  | ITA       | The Corpus PAISÀ [(Lyding et al., 2014)](#references)       |
+| Italian          | Indo-European  | ITA       | The PAISÀ Corpus [(Lyding et al., 2014)](#references)       |
 | Japanese         | Japanese       | JPN       | Japanese Internet Corpus [(Sharoff, 2006)](#references)     |
 | Korean           | Korean         | KOR       | Leipzig Corpora Collection (LCC)                            |
 | Mandarin Chinese | Sino-Tibetan   | CMN       | Chinese Internet Corpus [(Sharoff, 2006)](#references)      |
@@ -327,14 +327,14 @@ Additionally, no syllabiﬁcation was required for Sino-Tibetan languages (*Cant
 
 The data is structured as follows:
 
-  - *Language* is the unique language ISO 639-3 ID with `r length(unique(info.rate.data$Language))` possible values `r paste0('"',sort(unique(info.rate.data$Language)),'"',collapse=", ")`;
-  - *Language family* is the language family with `r length(unique(info.rate.data$Family))` possible values `r paste0('"',sort(unique(info.rate.data$Family)),'"',collapse=", ")`;
-  - *Text* is the text identifier (similar across languages and speakers) with `r length(unique(info.rate.data$Text))` possible values `r paste0('"',sort(unique(info.rate.data$Text)),'"',collapse=", ")`;
+  - *Language* is the unique language ISO 639-3 ID with `r length(unique(info.rate.data$Language))` possible values: `r paste0('"',sort(unique(info.rate.data$Language)),'"',collapse=", ")`;
+  - *Language family* is the language family with `r length(unique(info.rate.data$Family))` possible values: `r paste0('"',sort(unique(info.rate.data$Family)),'"',collapse=", ")`;
+  - *Text* is the text identifier (similar across languages and speakers) with `r length(unique(info.rate.data$Text))` possible values: `r paste0('"',sort(unique(info.rate.data$Text)),'"',collapse=", ")`;
   - *Speaker* is the unique speaker's ID (there are `r length(unique(info.rate.data$Speaker))` in the dataset);
   - *Sex* is the speaker's sex;
   - *Age* is the speaker's age (available only for a subset of `r tmp <- unique(info.rate.data[,c("Speaker","Age")]); sum(!is.na(tmp$Age))` speakers);
-  - *Duration* is the texts' duration in seconds as spoken by the given speaker (pauses longer than 150ms being excluded);
-  - *NS* is the texts' number of of syllables (the same for a given text in a given language);
+  - *Duration* is the duration of the texts in seconds as spoken by a given speaker (pauses longer than 150ms being excluded);
+  - *NS* is the number of of syllables of the texts (the same for a given text in a given language);
   - *SR* is the speech rate (syllables/second) for a given text spoken by a given speaker;
   - *ShE* (resp. *ID*) is the first-order (resp. second-order) language-level entropy estimate;
   - *ShIR* and *IR* are text * speaker properties obtained by multiplying *SR* by *ShE* and *ID* respectively.
@@ -343,10 +343,10 @@ The data is structured as follows:
 ### Technical notes on regressions
 
 We use throughout *sum contrasts* for the factor IVs, which are orthogonal contrasts which compare every level of the IV to the overall mean (for example, for a two-levels factor such as *Sex* we do not compare *Males* with *Females* but each with their overall mean, which is included in the intercept).
-However, in `R` the `contr.sum()` function used to define this contrasts produces level names that are very uninformative, so we explicit these below (please note that in the model outputs the *last* level is usually not shown):
+However, in `R` the `contr.sum()` function used to define these contrasts produces level names that are very uninformative, so we explicit these below (please note that in the model outputs the *last* level is usually not shown):
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
-for( tmp in c("Sex", "Text", "Language", "Family") ) cat(paste0("  - ***",tmp,"***: ",paste0("`",tmp,1:length(levels(info.rate.data[,tmp])),"` = *",levels(info.rate.data[,tmp]),"*", collapse=", "), " (the last level, `",tmp, length(levels(info.rate.data[,tmp])),"` is usually not displayed);\n"));
+for( tmp in c("Sex", "Text", "Language", "Family") ) cat(paste0("  - ***",tmp,"***: ",paste0("`",tmp,1:length(levels(info.rate.data[,tmp])),"` = *",levels(info.rate.data[,tmp]),"*", collapse=", "), " (the last level, `",tmp, length(levels(info.rate.data[,tmp])),",` is usually not displayed);\n"));
 ```
 
 
@@ -388,7 +388,7 @@ knitr::kable(unique(tmp[,c("Speaker", "Sex", "Language", "Age")]) %>%
                       1,
                       #1,
                       1,
-                      NA), caption="Distribution of speaker number and characteristics (sex and age) by language. *Lng*=language, *# spkrs*=number of speakers, *% fem*=percent female speakers, *# age*=number of speakers with age info, and for those, *mean(age)*=mean age, *sd(age)*=standard deviation of age, and *actual ages*=the sorted ages.");
+                      NA), caption="Distribution of speaker number and characteristics (sex and age) by language. *Lng*=language, *# spkrs*=number of speakers, *% fem*=percentage of female speakers, *# age*=number of speakers with age info, and for those, *mean(age)*=mean age, *sd(age)*=standard deviation of age, and *actual ages*=the sorted ages.");
 
 ```
 
@@ -689,19 +689,19 @@ cor.test(info.rate.data$SR, info.rate.data$ID, method="spearman");
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 tmp1 <- icc(lmer(NS ~ 1 + (1 | Text) + (1 | Family/Language) + (1 | Speaker), data=info.rate.data))
 knitr::kable(data.frame("f"=c("Text", "Family", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Family"], tmp1["Language:Family"], tmp1["Speaker"])), 
-             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `NS ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker)`.");
+             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `NS ~ 1 + (1 | Text) + (1 | Family/Language)+ (1 | Speaker)`.");
 
 tmp1 <- icc(lmer(SR ~ 1 + (1 | Text) + (1 | Family/Language) + (1 | Speaker), data=info.rate.data))
 knitr::kable(data.frame("f"=c("Text", "Family", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Family"], tmp1["Language:Family"], tmp1["Speaker"])), 
-             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `SR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker)`.");
+             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `SR ~ 1 + (1 | Text) + (1 | Family/Language)+ (1 | Speaker)`.");
 
 tmp1 <- icc(lmer(ShIR ~ 1 + (1 | Text) + (1 | Family/Language) + (1 | Speaker), data=info.rate.data))
 knitr::kable(data.frame("f"=c("Text", "Family", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Family"], tmp1["Language:Family"], tmp1["Speaker"])), 
-             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `ShIR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker)`.");
+             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `ShIR ~ 1 + (1 | Text) + (1 | Family/Language)+ (1 | Speaker)`.");
 
 tmp1 <- icc(lmer(IR ~ 1 + (1 | Text) + (1 | Family/Language) + (1 | Speaker), data=info.rate.data))
 knitr::kable(data.frame("f"=c("Text", "Family", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Family"], tmp1["Language:Family"], tmp1["Speaker"])), 
-             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `IR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker)`.");
+             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `IR ~ 1 + (1 | Text) + (1 | Family/Language)+ (1 | Speaker)`.");
 ```
 
 
@@ -1039,15 +1039,14 @@ ir.sex.age.lmer <-lmer(IR ~ Age * Sex + (1 | Text) + (1 | Family/Language), data
 summary(ir.sex.age.lmer);
 ```
 
-So, it seems *Age* and *Sex* are both worth including in our models (even if we have to discard quite a bit of data because of missing *Age* info).
-(In fact, the effect of *Age* seems more significant than that of *Sex*.)
+So, it seems *Age* and *Sex* are both worth including in our models (even if we have to discard quite a bit of data because of missing *Age* info) (in fact, the effect of *Age* seems more significant than that of *Sex*).
 
-In the following, we investigate if *Age* does matter when using GAMLSS modelling...
+In the following, we investigate if *Age* does matter when using GAMLSS modelling.
 
 
 ### GAMLSS with Age
 
-Bescause there is missing data fro *Age*, and because the GAMLSS models require no missing data, we will fit the models with *Age* (and its interaction with *Sex*) on the subset of the data that contains only those speakers with *Age* info.
+Bescause there is missing data from *Age*, and because the GAMLSS models require no missing data, we will fit the models with *Age* (and its interaction with *Sex*) on the subset of the data that contains only those speakers with *Age* info.
 To make comparability possible, we also fit the same models but without *Age* on the exact same subset of the data.
 
 ```{r subselect the dataset contaning only the relevant info (including Age), echo=FALSE}
@@ -1305,7 +1304,7 @@ The compared models are:
 
 Clearly, adding *Age* is not warranted here (as is the interaction between *ID* and *Sex*)...
 
-As above, we also looked a the simple lmer model:
+As above, we also looked at the simple lmer model:
 
 ```{r SR_ID_lmer_age, echo=FALSE}
 lmer.SR.ID.age <- lmer(SR ~ 1 + ID + Sex * Age + (1 | Text) + (1 | Speaker) + (1 | Family), data=info.rate.data.for.age)
@@ -1341,11 +1340,11 @@ When modelling *SR* and *IR* with *GAMLSS*, while there are hints that *Age* has
   - a **negative** main effect (i.e., *older* speakers of both sexes are *slower* and transmit *less information* per unit time across texts and languages), and
   - an **interaction** with *Sex* (*positive* for *males*, i.e., males are *less negatively affected* by age that females across texts and languages),
     
-it does *not* seem warranted to include it in these models.
+It does *not* seem warranted to include it in these models.
   
 When modelling the *relationship* between *SR* and *ID*, this *negative relationship*:
 
-  - seems **strengthened** with increasing *Age* (i.e., older speakers of both sexes shows a stronger negative relationship between *SR* and *ID*), and 
+  - seems **strengthened** with increasing *Age* (i.e., older speakers of both sexes show a stronger negative relationship between *SR* and *ID*), and 
   - there is an **interaction** with *Sex* (for females, this effect of *Age* is stronger than for males), 
   
 but, alas, the inclusion of *Age* is not warranted in the *GAMLSS model*, nor (really) in the simpler *LMER model*.
@@ -1355,7 +1354,7 @@ Thus, while *Age* seems to **negatively influence** (in a **sex-dependent manner
 
 ## Is there any relationship between *ID*, *Age* and *Sex*?
 
-Here we test the hypothesis that *ID* is confounded by *Age* and *Sex* structure between languages:
+Here we test the hypothesis that *ID* is confounded by *Age* and *Sex* structures between languages:
 
 ```{r ID_age_sex, echo=FALSE}
 model.ID.age.sex <- lmer(ID ~ 1 + Sex * Age + (1 | Family), data=info.rate.data.for.age);
@@ -1370,7 +1369,7 @@ Thus, there does not seem to be any relationship between *ID*, *Age* and *Sex*.
 
 ## Relationship between *ID* and the *syntagmatic density of information ratio* (SDIR)
 
-In our case, SDIR (versus *Vietnamese*) is reduced to the ratio between the number of syllables (*NS*) in *Vietnamese* to the *NS* in the language *L* for each *Text* separately; we denote this here also as *NSVR* (from "NS Vietnamese Ratio").
+In our case, SDIR (versus *Vietnamese*) is reduced to the ratio between the number of syllables (*NS*) in *Vietnamese* and the *NS* in the language *L* for each *Text* separately; we denote this here also as *NSVR* (from "NS Vietnamese Ratio").
 
 ### *SDIR* separately for each *Text* and *Language*
 
@@ -1433,7 +1432,7 @@ summary(m1);
 
 ## Mixture of Gaussians
 
-In what follows, mixing probabilities are independent from factors such as Sex.
+In what follows, mixing probabilities is done independently from factors such as Sex.
 
 ### SR
 
@@ -1564,11 +1563,11 @@ legend("topleft", legend=c("K=1","K=2", "K=3", "K=4", "K=5"), lty=c(2,1,2,2,2), 
 
 We used three ways to estimate how unimodal a distribution is, as they tend to disagree and the problem of unimodality testing is far from settled (see [Freeman & Dale, 2013](#references)):
 
-  - the **Silverman test** tests the null hypothesis that an underlying density has at most *k* modes. The null hypothesis is that the underlying density has at most *k* modes (H0: number of modes <= *k*). The result is the *p*-value (bootstrapped) of rejecting a unimodal distribution. It is described in [Silverman (1981)](#references) and [Hall & York (2001)](#references); our implementation is based on the code available at https://www.mathematik.uni-marburg.de/~stochastik/R_packages/;
-  - the **dip test** which computes Hartigans’ dip statistic *D_n_*, and its *p*-value for the test for unimodality, by interpolating tabulated quantiles of *sqrt(n) &bull; D_n_*. For *X_i_* ∼ *F*, i.i.d., the null hypothesis is that *F* is a unimodal distribution. The result is the *D* metric and the *p*-value (interpolated) of rejecting a unimodal distribution. See [Hartigan (1985)](#references) and [Hartigan & Hartigan (1985)](#references); it is implemented in package `diptest`;
+  - the **Silverman test** tests the null hypothesis that an underlying density has at most *k* modes (H0: number of modes <= *k*). The result is the *p*-value (bootstrapped) of rejecting a unimodal distribution. It is described in [Silverman (1981)](#references) and [Hall & York (2001)](#references); our implementation is based on the code available at https://www.mathematik.uni-marburg.de/~stochastik/R_packages/;
+  - the **dip test** which computes Hartigans’ dip statistic *$D_n$*, and its *p*-value for the test for unimodality, by interpolating tabulated quantiles of *sqrt(n) &bull; $D_n$*. For *$X_i$* ∼ *F*, i.i.d., the null hypothesis is that *F* is a unimodal distribution. The result is the *D* metric and the *p*-value (interpolated) of rejecting a unimodal distribution. See [Hartigan (1985)](#references) and [Hartigan & Hartigan (1985)](#references); it is implemented in package `diptest`;
   - the **bimodality coefficient** (BC) which is based on an empirical relationship between bimodality and the third and fourth statistical moments of a distribution (skewness and kurtosis). It is proportional to the division of squared skewness with uncorrected kurtosis, *BC* &asymp;  (*s*^2^ + 1)/*k*, with the underlying logic that a bimodal distribution will have very low kurtosis, an asymmetric character, or both; all of these conditions increase *BC*. The values range from 0 and 1, with those exceeding .555 (the value representing a uniform distribution) suggesting bi-modality. The result is the *DC* estimate (which must exceed 0.555 to reject a unimodal distribution). We implemented it following [Freeman & Dale (2013)](#references) as *BC* =  (*s*^2^ + 1)/(*k* + 3 &bull; ((n-1)^2^ / ((n-2) &bull; (n-3)))).
   
-For each such test, we performed four randomisation procedures to obtain an estimate of the "specialness" of the observed unimodality estimate; for each new permuted dataset, we recompute everything before estimating the unimodlaity of the permuted distribution:
+For each such test, we performed four randomisation procedures to obtain an estimate of the "specialness" of the observed unimodality estimate; for each new permuted dataset, we recomputed everything before estimating the unimodality of the permuted distribution:
 
   - Permutation model 1 (**PM1**): randomly permute the SR values freely among speakers, texts and languages;
   - Permutation model 2 (**PM2**): randomly permute the ID values among languages;
@@ -1929,7 +1928,7 @@ if( do.expensive.computations || !file.exists("./unimodality-tests-cached.RData"
 
 #### PM1
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the texts' SRs (PM1)**."}
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the SRs of the texts (PM1)**."}
 results <- NULL; # collect results for pretty printing
 
 # Plotting:
@@ -2018,7 +2017,7 @@ results <- rbind(results, data.frame("scenario"="PM1", "test"="BC", "measure"="I
 
 #### PM2
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the languages' ID (PM2)**."}
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the IDs of the languages (PM2)**."}
 # Plotting:
 par(mfrow=c(3,2));
 alpha.level = 0.05;
@@ -2198,7 +2197,7 @@ results <- rbind(results, data.frame("scenario"="PM3", "test"="BC", "measure"="I
 
 #### PM4
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the languages' average SRs with speaker adjustement (PM4)**."}
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the average SRs of the languages with speaker adjustement (PM4)**."}
 # Plotting:
 par(mfrow=c(3,2));
 alpha.level = 0.05;
@@ -2302,7 +2301,7 @@ knitr::kable(results, digits=3, row.names=FALSE,
 
 ## Pair-wise distances between languages
 
-We compute various distances between languages (as implemented by function `distance()` in package `philentropy`) in what concerns the distribution of NS, SR and ID.
+We compute various distances between languages (as implemented by the `distance()` function in package `philentropy`) in what concerns the distribution of NS, SR and ID.
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=6, fig.cap="Comparing the distribution of pairwise distances between languages."}
 # Compute all sorts of distances between all paris of grouping.var values for the values of measured.var:
@@ -2464,7 +2463,7 @@ pander(sessionInfo(), compact=TRUE);
 
 ## Appendix II: Speech Rate: Canonical vs. automatic detection
 
-Here we compare the Speech Rate (*SR*) used in paper and defined as the *canonical articulatory rate* (= the number of syllables corresponding to the canonical text pronunciation per second of speech) with an estimate of the *realized speech rate*, based on the *automatic detection* of syllable nuclei implemented by the popular algorithm described in De Jong, Nivja H., and Ton Wempe. "Praat script to detect syllable nuclei and measure speech rate automatically." Behavior research methods 41.2 (2009): 385-390.
+Here we compare the Speech Rate (*SR*) used in the paper and defined as the *canonical articulatory rate* (= the number of syllables corresponding to the canonical text pronunciation per second of speech) with an estimate of the *realized speech rate*, based on the *automatic detection* of syllable nuclei implemented by the popular algorithm described in De Jong, Nivja H., and Ton Wempe. "Praat script to detect syllable nuclei and measure speech rate automatically." Behavior research methods 41.2 (2009): 385-390.
 We used their algorithm with standard parameters (except for pauses which were retrieved from our manual annotation to match the main analysis) on the actual oral productions of our speakers, and the results are available in the TAB-separated CSV file `AutomaticSylDetect.csv` with the following structure:
 
   - **soundname**: combination of Language, Text and Speaker info
