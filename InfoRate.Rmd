@@ -1,8 +1,8 @@
 ---
-title: "Human languages share an optimal information transmission rate"
+title: "Different languages, similar encoding efficiency"
 subtitle: "Full statistical analysis and plots"
-author: "Christophe Coupé, Dan Dediu and François Pellegrino"
-date: '`r Sys.time()`'
+author: "Christophe Coupé, Yoon Mi Oh, Dan Dediu and François Pellegrino"
+date: '`r date()`'
 output:
   html_document:
     fig_caption: yes
@@ -18,14 +18,15 @@ editor_options:
 
 ```{r setup, echo=F, message=F, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-library(ggplot2)
-library(reshape2)
-library(plyr)
-library(lmerTest)
-library(gamlss)
-library(gamlss.mx)
-library(sjstats)
-library(sjPlot)
+library(ggplot2);
+library(ggrepel);
+library(reshape2);
+library(plyr);
+library(lmerTest);
+library(gamlss);
+library(gamlss.mx);
+library(sjstats);
+library(sjPlot);
 library(moments);
 library(parallel);
 library(pander);
@@ -39,7 +40,7 @@ dir.create("./figures", showWarnings=FALSE); # figures are saved here
 
 do.expensive.computations = FALSE; # force the expensive computations
 
-no.cores <- max(c(detectCores()-2, 1), na.rm=TRUE); # use less than 2 of the cores in the system (this includes hyperthreded ones)
+no.cores <- ifelse(.Platform$OS.type == "windows", 1, max(detectCores()-1, 1, na.rm=TRUE)); # use all cores in the system except 1 (including hyperthreading), except on Windows, were this defaults to 1 core
 
 options(width = 250);
 options(contrasts=c("contr.treatment","contr.poly"));
@@ -193,8 +194,17 @@ multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
 
 ```{r loading_data, echo=FALSE, message=FALSE, warning=FALSE}
 # Loading and preparing the data:
-
 info.rate.data <- read.table("./InfoRateData.csv", header=TRUE, sep="\t", quote="", stringsAsFactors=FALSE);
+
+# Compute Speech Rate (SR), Shannon Information Rate (ShIR), and Conditional Information Rate (IR):
+info.rate.data$SR   <- (info.rate.data$NS / info.rate.data$Duration);
+info.rate.data$ShIR <- (info.rate.data$SR * info.rate.data$ShE);
+info.rate.data$IR   <- (info.rate.data$SR * info.rate.data$ID);
+
+# Add NS(VIE) / NS(L) for each language L and text T:
+info.rate.data <- merge(info.rate.data, unique(info.rate.data[info.rate.data$Language=="VIE", c("Text", "NS")]), by="Text", suffixes=c("",".y"), all.x=TRUE);
+names(info.rate.data)[ncol(info.rate.data)] <- "NSVR";
+info.rate.data$NSVR <- info.rate.data$NSVR / info.rate.data$NS;
 
 # Add language family data:
 info.rate.data$Family <- Vectorize(function(a) # assign language family to langauge codes
@@ -222,16 +232,27 @@ info.rate.data$Family <- Vectorize(function(a) # assign language family to langa
 }, "a")(as.character(info.rate.data$Language));
 
 # Convert to factors:
-info.rate.data$Text <- as.factor(info.rate.data$Text)
-info.rate.data$Speaker <- as.factor(info.rate.data$Speaker)
-info.rate.data$Language <- as.factor(info.rate.data$Language)
-info.rate.data$Sex <- as.factor(info.rate.data$Sex)
+info.rate.data$Text <- as.factor(info.rate.data$Text);
+info.rate.data$Speaker <- as.factor(info.rate.data$Speaker);
+info.rate.data$Language <- as.factor(info.rate.data$Language);
+info.rate.data$Sex <- as.factor(info.rate.data$Sex);
+info.rate.data$Family <- as.factor(info.rate.data$Family);
+
+# Make sure we use contrasts to the overall mean for factors:
+contrasts(info.rate.data$Text) <- contr.sum(length(levels(info.rate.data$Text)));
+contrasts(info.rate.data$Speaker) <- contr.sum(length(levels(info.rate.data$Speaker)));
+contrasts(info.rate.data$Language) <- contr.sum(length(levels(info.rate.data$Language)));
+contrasts(info.rate.data$Sex) <- contr.sum(length(levels(info.rate.data$Sex)));
+contrasts(info.rate.data$Family) <- contr.sum(length(levels(info.rate.data$Family)));
+
+# Sort by Language, Speaker and Text:
+info.rate.data <- info.rate.data[order(info.rate.data$Language, info.rate.data$Speaker, info.rate.data$Text),];
 ```
 
 
 ## Introduction
 
-This `Rmarkdown` script (and corresponding TAB-separated CSV input data file `InfoRateData.csv` and the resulting `HTML` document) contain the full analysis and plotting code accompanying the paper *Human languages share an optimal information transmission rate*.
+This `Rmarkdown` script (and the corresponding TAB-separated CSV input data files `InfoRateData.csv` and `AutomaticSylDetect.csv`, and the resulting `HTML` document) contains the full analysis and plotting code accompanying the paper *Different languages, similar encoding efficiency: comparable information rates across the human communicative niche*.
 
 
 ## The data
@@ -239,6 +260,7 @@ This `Rmarkdown` script (and corresponding TAB-separated CSV input data file `In
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
 # Transform it into the long format:
 info.rate.data.long <- melt(info.rate.data, id.vars=c("Language", "Text", "Speaker", "Sex", "Family"));
+
 # Extract speakers, languages and texts:
 speakers <- sort(unique(info.rate.data$Speaker)); 
 languages <- sort(unique(info.rate.data$Language)); 
@@ -247,7 +269,7 @@ texts <- sort(unique(info.rate.data$Text));
 ```
 
 For more information on the data, please see [Oh (2015)](#references).
-There are in total `r length(unique(info.rate.data$Language))` languages (see the Table below).
+There are in total `r length(unique(info.rate.data$Language))` languages (see the table below).
 
 ### The Oral Corpus
 
@@ -257,14 +279,22 @@ The material consists of 15 short texts of 3-5 semantically connected sentences 
 For the other 14 languages, two of the authors supervised the translation and recording of new datasets. 
 All participants were native speakers of the target language, with a focus on a specific variety of the language when possible – e.g. *Mandarin* spoken in Beijing, *Serbian* in Belgrade and *Korean* in Seoul. 
 No strict control on age or on the speakers’ social diversity was performed, but speakers were mainly students or members of academic institutions.
-Speakers were asked to read three times (first silently and then loudly twice) each text. 
+Speakers were asked to read three or four times (first silently and then loudly two or three times) each text. 
 The texts were presented one by one on the screen in random order, in a self-paced reading paradigm. 
-This way, speakers familiarized themselves with the text and reduce their reading errors.
-The second loud recording was analyzed in this study.
+This way, speakers familiarized themselves with the text and reduced their reading errors.
+The last loud recording was analyzed in this study.
+
+With these, the oral corpus contains `r nrow(info.rate.data)` texts read by `r length(speakers)` speakers coming from `r length(languages)` languages and `r length(texts)` texts.
+
+For each language and text we have the following number of syllables (*NS*):
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+knitr::kable(unique(info.rate.data[,c("Language","Text","NS")]),
+             row.names=FALSE, caption="Number of syllables (*NS*) per language and text.");
+```
 
 ### Text Corpus
 
-Text datasets were acquired from various sources as illustrated in the Table below. 
+Text datasets were acquired from various sources as illustrated in the table below. 
 After an initial data curation, each dataset was phonetically transcribed and automatically syllabiﬁed by a rule-based program written by one of the authors, except in the following cases: 
 
   i) when syllabiﬁcation was already provided with the dataset (*English*, *French*, *German*, and *Vietnamese* for the multisyllabic words); 
@@ -283,7 +313,7 @@ Additionally, no syllabiﬁcation was required for Sino-Tibetan languages (*Cant
 | French           | Indo-European  | FRA       | Lexique 3.80 [(New et al., 2001)](#references)              |
 | German           | Indo-European  | DEU       | WebCelex (MPI for Psycholinguistics)                        |
 | Hungarian        | Uralic         | HUN       | Hungarian National Corpus [(Váradi, 2002)](#references)     |
-| Italian          | Indo-European  | ITA       | The Corpus PAISÀ [(Lyding et al., 2014)](#references)       |
+| Italian          | Indo-European  | ITA       | The PAISÀ Corpus [(Lyding et al., 2014)](#references)       |
 | Japanese         | Japanese       | JPN       | Japanese Internet Corpus [(Sharoff, 2006)](#references)     |
 | Korean           | Korean         | KOR       | Leipzig Corpora Collection (LCC)                            |
 | Mandarin Chinese | Sino-Tibetan   | CMN       | Chinese Internet Corpus [(Sharoff, 2006)](#references)      |
@@ -297,26 +327,74 @@ Additionally, no syllabiﬁcation was required for Sino-Tibetan languages (*Cant
 
 The data is structured as follows:
 
-  - *Language* is the unique language ISO 639-3 ID with `r length(unique(info.rate.data$Language))` possible values `r paste0('"',sort(unique(info.rate.data$Language)),'"',collapse=", ")`;
-  - *Language family* is the language family with `r length(unique(info.rate.data$Family))` possible values `r paste0('"',sort(unique(info.rate.data$Family)),'"',collapse=", ")`;
-  - *Text* is the text identifier (similar across languages and speakers) with `r length(unique(info.rate.data$Text))` possible values `r paste0('"',sort(unique(info.rate.data$Text)),'"',collapse=", ")`;
-  - *Speaker* is the unique speaker's ID: `r length(unique(info.rate.data$Speaker))`;
+  - *Language* is the unique language ISO 639-3 ID with `r length(unique(info.rate.data$Language))` possible values: `r paste0('"',sort(unique(info.rate.data$Language)),'"',collapse=", ")`;
+  - *Language family* is the language family with `r length(unique(info.rate.data$Family))` possible values: `r paste0('"',sort(unique(info.rate.data$Family)),'"',collapse=", ")`;
+  - *Text* is the text identifier (similar across languages and speakers) with `r length(unique(info.rate.data$Text))` possible values: `r paste0('"',sort(unique(info.rate.data$Text)),'"',collapse=", ")`;
+  - *Speaker* is the unique speaker's ID (there are `r length(unique(info.rate.data$Speaker))` in the dataset);
   - *Sex* is the speaker's sex;
-  - *Duration* is the texts' duration in seconds as spoken by the given speaker (pauses longer than 150ms being excluded);
-  - *NS* is the texts' number of of syllables (the same for a given text in a given language);
+  - *Age* is the speaker's age (available only for a subset of `r tmp <- unique(info.rate.data[,c("Speaker","Age")]); sum(!is.na(tmp$Age))` speakers);
+  - *Duration* is the duration of the texts in seconds as spoken by a given speaker (pauses longer than 150ms being excluded);
+  - *NS* is the number of of syllables of the texts (the same for a given text in a given language);
   - *SR* is the speech rate (syllables/second) for a given text spoken by a given speaker;
   - *ShE* (resp. *ID*) is the first-order (resp. second-order) language-level entropy estimate;
   - *ShIR* and *IR* are text * speaker properties obtained by multiplying *SR* by *ShE* and *ID* respectively.
-  
+
+
+### Technical notes on regressions
+
+We use throughout *sum contrasts* for the factor IVs, which are orthogonal contrasts which compare every level of the IV to the overall mean (for example, for a two-levels factor such as *Sex* we do not compare *Males* with *Females* but each with their overall mean, which is included in the intercept).
+However, in `R` the `contr.sum()` function used to define these contrasts produces level names that are very uninformative, so we explicit these below (please note that in the model outputs the *last* level is usually not shown):
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+for( tmp in c("Sex", "Text", "Language", "Family") ) cat(paste0("  - ***",tmp,"***: ",paste0("`",tmp,1:length(levels(info.rate.data[,tmp])),"` = *",levels(info.rate.data[,tmp]),"*", collapse=", "), " (the last level, `",tmp, length(levels(info.rate.data[,tmp])),",` is usually not displayed);\n"));
+```
+
 
 ### Exploratory plots and summaries
+
+#### Speaker characteristics
+
+```{r Speaker characteristics, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10, fig.cap="NS: exploratory plots."}
+tmp <- info.rate.data; 
+tmp$Language <- factor(tmp$Language, levels=c("VIE","EUS","CAT","DEU","ENG","FRA","ITA","SPA","SRP","JPN","KOR","CMN","YUE","THA","TUR","FIN","HUN"));
+tmp$Family <- factor(tmp$Family); tmp$Family <- revalue(tmp$Family, c("Austroasiatic"="AA", "Basque"="B", "Indo-European"="IE", "Japanese"="J", "Korean"="K", "Sino-Tibetan"="ST", "Tai-Kadai"="TK", "Turkic"="T", "Uralic"="U"));
+
+knitr::kable(unique(tmp[,c("Speaker", "Sex", "Language", "Age")]) %>% 
+               dplyr::group_by(Language) %>%
+               dplyr::summarise("no.speakers"=length(Speaker), 
+                                #"females"=sum(Sex=="F",na.rm=TRUE), 
+                                "females.perc"=100*sum(Sex=="F",na.rm=TRUE)/length(Speaker),
+                                "with.age"=sum(!is.na(Age)), 
+                                "mean.age"=mean(Age,na.rm=TRUE), 
+                                #"median.age"=median(Age,na.rm=TRUE), 
+                                "sd.age"=sd(Age,na.rm=TRUE),
+                                "ages"=paste0("(",paste0(sort(Age),collapse=", "),")")) %>%
+               dplyr::arrange(as.character(Language)),
+             col.names=c("Lng", 
+                         "# spkrs", 
+                         #"# females", 
+                         "% fem", 
+                         "# age", 
+                         "mean(age)", 
+                         #"median(age)", 
+                         "sd(age)", 
+                         "actual ages"),
+             row.names=FALSE, 
+             digits=c(NA,
+                      0,
+                      #0,
+                      1,
+                      0,
+                      1,
+                      #1,
+                      1,
+                      NA), caption="Distribution of speaker number and characteristics (sex and age) by language. *Lng*=language, *# spkrs*=number of speakers, *% fem*=percentage of female speakers, *# age*=number of speakers with age info, and for those, *mean(age)*=mean age, *sd(age)*=standard deviation of age, and *actual ages*=the sorted ages.");
+
+```
 
 #### NS
 
 ```{r NS by Language and Text, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=10, fig.cap="NS: exploratory plots."}
-tmp <- info.rate.data; 
-tmp$Language <- factor(tmp$Language, levels=c("VIE","EUS","CAT","DEU","ENG","FRA","ITA","SPA","SRP","JPN","KOR","CMN","YUE","THA","TUR","FIN","HUN"));
-tmp$Family <- factor(tmp$Family); tmp$Family <- revalue(tmp$Family, c("Austroasiatic"="AA", "Basque"="B", "Indo-European"="IE", "Japanese"="J", "Korean"="K", "Sino-Tibetan"="ST", "Tai-Kadai"="TK", "Turkic"="T", "Uralic"="U"));
 multiplot(plotlist=list(ggplot(tmp, aes(x=NS)) + geom_histogram(col="yellow") + xlab("NS"),
                         {
                           # From http://mgimond.github.io/ES218/Week06a.html:
@@ -360,7 +438,34 @@ multiplot(plotlist=list(ggplot(tmp, aes(x=SR)) + geom_histogram(col="yellow") + 
 ```
 
 ```{r SR by Speaker, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="SR per speaker."}
-ggplot(info.rate.data, aes(x=Speaker, y=SR, color=Language)) + geom_boxplot() + ylab("SR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+# ggplot(info.rate.data, aes(x=Speaker, y=SR, color=Language, fill=Sex)) + 
+#   geom_boxplot() + 
+#   scale_fill_manual(values=c("F"="white", "M"="gray50")) +
+#   ylab("SR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+ggplot(info.rate.data %>% 
+         mutate(Speaker=reorder(Speaker, SR, median)) %>%
+         mutate(Speaker=reorder(Speaker, as.character(Sex), min)) %>% 
+         mutate(Speaker=reorder(Speaker, as.character(Language), min)), 
+       aes(x=Speaker, y=SR, color=Language, fill=Sex)) + 
+  geom_boxplot() + #geom_vline(aes(xintercept=Language)) +
+  scale_fill_manual(values=c("F"="white", "M"="gray70")) +
+  #facet_wrap(. ~ Language, scales="free_x") +
+  ylab("SR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+```
+
+```{r SR by Sex and Age across Languages, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="SR by Sex and Age across Languages."}
+ggplot(info.rate.data, 
+       aes(x=Age, y=SR, color=Language, shape=Sex, fill=Sex)) + 
+  geom_point() +
+  geom_smooth(aes(group=Sex), method="lm", formula=y ~ poly(x,2));
+```
+
+```{r SR by Sex, Age and Language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=8, fig.cap="SR by Sex, Age and Language."}
+ggplot(info.rate.data, 
+       aes(x=Age, y=SR, color=Sex, shape=Sex)) + 
+  geom_point() +
+  geom_smooth(method="lm", formula=y ~ poly(x,2)) +
+  facet_wrap(. ~ Language, scales="free_x");
 ```
 
 ```{r SR distributions by language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=6, fig.cap="SR by language."}
@@ -456,7 +561,31 @@ multiplot(plotlist=list(ggplot(tmp, aes(x=ShIR)) + geom_histogram(col="yellow") 
 ```
 
 ```{r ShIR by Speaker, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="ShIR per speaker."}
-ggplot(info.rate.data, aes(x=Speaker, y=ShIR, color=Language)) + geom_boxplot() + ylab("ShIR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+#ggplot(info.rate.data, aes(x=Speaker, y=ShIR, color=Language)) + geom_boxplot() + ylab("ShIR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+ggplot(info.rate.data %>% 
+         mutate(Speaker=reorder(Speaker, ShIR, median)) %>%
+         mutate(Speaker=reorder(Speaker, as.character(Sex), min)) %>% 
+         mutate(Speaker=reorder(Speaker, as.character(Language), min)), 
+       aes(x=Speaker, y=ShIR, color=Language, fill=Sex)) + 
+  geom_boxplot() + #geom_vline(aes(xintercept=Language)) +
+  scale_fill_manual(values=c("F"="white", "M"="gray70")) +
+  #facet_wrap(. ~ Language, scales="free_x") +
+  ylab("ShIR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+```
+
+```{r ShIR by Sex and Age across Languages, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="ShIR by Sex and Age across Languages."}
+ggplot(info.rate.data, 
+       aes(x=Age, y=ShIR, color=Language, shape=Sex, fill=Sex)) + 
+  geom_point() +
+  geom_smooth(aes(group=Sex), method="lm", formula=y ~ poly(x,2));
+```
+
+```{r ShIR by Sex, Age and Language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=8, fig.cap="ShIR by Sex, Age and Language."}
+ggplot(info.rate.data, 
+       aes(x=Age, y=ShIR, color=Sex, shape=Sex)) + 
+  geom_point() +
+  geom_smooth(method="lm", formula=y ~ poly(x,2)) +
+  facet_wrap(. ~ Language, scales="free_x");
 ```
 
 ```{r ShIR distributions by language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=6, fig.cap="ShIR by language."}
@@ -480,7 +609,31 @@ multiplot(plotlist=list(ggplot(tmp, aes(x=IR)) + geom_histogram(col="yellow") + 
 ```
 
 ```{r IR by Speaker, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="IR per speaker."}
-ggplot(info.rate.data, aes(x=Speaker, y=IR, color=Language)) + geom_boxplot() + ylab("IR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+#ggplot(info.rate.data, aes(x=Speaker, y=IR, color=Language)) + geom_boxplot() + ylab("IR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+ggplot(info.rate.data %>% 
+         mutate(Speaker=reorder(Speaker, IR, median)) %>%
+         mutate(Speaker=reorder(Speaker, as.character(Sex), min)) %>% 
+         mutate(Speaker=reorder(Speaker, as.character(Language), min)), 
+       aes(x=Speaker, y=IR, color=Language, fill=Sex)) + 
+  geom_boxplot() + #geom_vline(aes(xintercept=Language)) +
+  scale_fill_manual(values=c("F"="white", "M"="gray70")) +
+  #facet_wrap(. ~ Language, scales="free_x") +
+  ylab("IR") + xlab("Speakers") + theme(axis.text.x=element_blank());
+```
+
+```{r IR by Sex and Age across Languages, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=5, fig.cap="IR by Sex and Age across Languages."}
+ggplot(info.rate.data, 
+       aes(x=Age, y=IR, color=Language, shape=Sex, fill=Sex)) + 
+  geom_point() +
+  geom_smooth(aes(group=Sex), method="lm", formula=y ~ poly(x,2));
+```
+
+```{r IR by Sex, Age and Language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=10, fig.height=8, fig.cap="IR by Sex, Age and Language."}
+ggplot(info.rate.data, 
+       aes(x=Age, y=IR, color=Sex, shape=Sex)) + 
+  geom_point() +
+  geom_smooth(method="lm", formula=y ~ poly(x,2)) +
+  facet_wrap(. ~ Language, scales="free_x");
 ```
 
 ```{r IR distributions by language, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=6, fig.cap="IR by language."}
@@ -528,27 +681,27 @@ cor.test(info.rate.data$SR, info.rate.data$ID, method="spearman");
 
 
 
-## Linear Mixed Modells (LMMs)
+## Linear Mixed Models (LMMs)
 
 
 ### Linear ICCs
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE}
-tmp1 <- icc(lmer(NS ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker), data=info.rate.data))
-knitr::kable(data.frame("f"=c("Text", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Language"], tmp1["Speaker"])), 
-             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `NS ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker)`.");
+tmp1 <- icc(lmer(NS ~ 1 + (1 | Text) + (1 | Family/Language) + (1 | Speaker), data=info.rate.data))
+knitr::kable(data.frame("f"=c("Text", "Family", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Family"], tmp1["Language:Family"], tmp1["Speaker"])), 
+             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `NS ~ 1 + (1 | Text) + (1 | Family/Language)+ (1 | Speaker)`.");
 
-tmp1 <- icc(lmer(SR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker), data=info.rate.data))
-knitr::kable(data.frame("f"=c("Text", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Language"], tmp1["Speaker"])), 
-             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `SR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker)`.");
+tmp1 <- icc(lmer(SR ~ 1 + (1 | Text) + (1 | Family/Language) + (1 | Speaker), data=info.rate.data))
+knitr::kable(data.frame("f"=c("Text", "Family", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Family"], tmp1["Language:Family"], tmp1["Speaker"])), 
+             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `SR ~ 1 + (1 | Text) + (1 | Family/Language)+ (1 | Speaker)`.");
 
-tmp1 <- icc(lmer(ShIR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker), data=info.rate.data))
-knitr::kable(data.frame("f"=c("Text", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Language"], tmp1["Speaker"])), 
-             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `ShIR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker)`.");
+tmp1 <- icc(lmer(ShIR ~ 1 + (1 | Text) + (1 | Family/Language) + (1 | Speaker), data=info.rate.data))
+knitr::kable(data.frame("f"=c("Text", "Family", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Family"], tmp1["Language:Family"], tmp1["Speaker"])), 
+             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `ShIR ~ 1 + (1 | Text) + (1 | Family/Language)+ (1 | Speaker)`.");
 
-tmp1 <- icc(lmer(IR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker), data=info.rate.data))
-knitr::kable(data.frame("f"=c("Text", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Language"], tmp1["Speaker"])), 
-             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `IR ~ 1 + (1 | Text) + (1 | Language)+ (1 | Speaker)`.");
+tmp1 <- icc(lmer(IR ~ 1 + (1 | Text) + (1 | Family/Language) + (1 | Speaker), data=info.rate.data))
+knitr::kable(data.frame("f"=c("Text", "Family", "Language", "Speaker"), "ICC"=c(tmp1["Text"], tmp1["Family"], tmp1["Language:Family"], tmp1["Speaker"])), 
+             digits=2, row.names=FALSE, col.names=c("Level-1 factor (f)", "ICC"), caption="ICC for model `IR ~ 1 + (1 | Text) + (1 | Family/Language)+ (1 | Speaker)`.");
 ```
 
 
@@ -557,14 +710,14 @@ knitr::kable(data.frame("f"=c("Text", "Language", "Speaker"), "ICC"=c(tmp1["Text
 #### Comparing models
 
 ```{r SR_lmm, echo=F}
-lmr0 <- lmer(SR ~ 1 + (1 | Text) + (1 | Language) + (1 | Speaker), data=info.rate.data);
-lmr1 <- lmer(SR ~ 1 + (1 | Language) + (1 | Speaker), data=info.rate.data);
+lmr0 <- lmer(SR ~ 1 + (1 | Text) + (1 | Family/Language) + (1 | Speaker), data=info.rate.data);
+lmr1 <- lmer(SR ~ 1 + (1 | Family/Language) + (1 | Speaker), data=info.rate.data);
 lmr2 <- lmer(SR ~ 1 + (1 | Text) + (1 | Speaker), data=info.rate.data);
-lmr3 <- lmer(SR ~ 1 + (1 | Text) + (1 | Language), data=info.rate.data);
-lmr4 <- lmer(SR ~ 1 + Sex + (1 | Text) + (1 | Language) + (1 | Speaker), data=info.rate.data);
-lmr5 <- lmer(SR ~ 1 + Sex + (1 | Language) + (1 | Speaker), data=info.rate.data);
+lmr3 <- lmer(SR ~ 1 + (1 | Text) + (1 | Family/Language), data=info.rate.data);
+lmr4 <- lmer(SR ~ 1 + Sex + (1 | Text) + (1 | Family/Language) + (1 | Speaker), data=info.rate.data);
+lmr5 <- lmer(SR ~ 1 + Sex + (1 | Family/Language) + (1 | Speaker), data=info.rate.data);
 lmr6 <- lmer(SR ~ 1 + Sex + (1 | Text) + (1 | Speaker), data=info.rate.data);
-lmr7 <- lmer(SR ~ 1 + Sex + (1 | Text) + (1 | Language), data=info.rate.data);
+lmr7 <- lmer(SR ~ 1 + Sex + (1 | Text) + (1 | Family/Language), data=info.rate.data);
 
 tmp <- do.call(rbind, lapply(list(lmr0, lmr1, lmr2, lmr3, lmr4, lmr5, lmr6, lmr7), 
                 function(lmr) data.frame("model"=as.character(summary(lmr, ddf="lme4")$call$formula)[3], "AIC"=round(AIC(lmr),2), "BIC"=round(BIC(lmr),2))));
@@ -576,20 +729,25 @@ knitr::kable(tmp, row.names=FALSE, caption="AIC and BIC for various hierarchical
 
 #### Residuals and random effects
 
-We consider here the full model `SR ~ 1 + Sex +  (1|Text) + (1|Language) + (1|Speaker)`.
+We consider here the full model `SR ~ 1 + Sex +  (1|Text) + (1|Family/Language) + (1|Speaker)`.
 
 ```{r SR_assumptions, echo=F}
-lmr <- lmer(SR ~ 1 + Sex +  (1|Text) + (1|Language) + (1|Speaker), data=info.rate.data)
+lmr <- lmer(SR ~ 1 + Sex +  (1|Text) + (1|Family/Language) + (1|Speaker), data=info.rate.data)
 # summary(lmr)
 plot(lmr)
 get_re_distrib(residuals(lmr), "Residuals")
 get_re_distrib(ranef(lmr)$Text[,1], "Levels of Text as random effect")
 get_re_distrib(ranef(lmr)$Language[,1],  "Levels of Language as random effect")
+get_re_distrib(ranef(lmr)$Family[,1],  "Levels of Family as random effect")
 get_re_distrib(ranef(lmr)$Speaker[,1], "Levels of Speaker as random effect")
-sjp.lmer(lmr0,
-         facet.grid = FALSE,
-         sort.est = "sort.all",
-         y.offset = .4)
+# sjp.lmer(lmr0,
+#          facet.grid = FALSE,
+#          sort.est = "sort.all",
+#          y.offset = .4)
+#plot_model(lmr,
+#           facet.grid = FALSE,
+#           sort.est = "sort.all",
+#           y.offset = .4)
 ```
 
 
@@ -598,14 +756,14 @@ sjp.lmer(lmr0,
 #### Comparing models
 
 ```{r IR_lmm, echo=F}
-lmr0 <- lmer(IR ~ 1 + (1 | Text) + (1 | Language) + (1 | Speaker), data=info.rate.data);
-lmr1 <- lmer(IR ~ 1 + (1 | Language) + (1 | Speaker), data=info.rate.data);
+lmr0 <- lmer(IR ~ 1 + (1 | Text) + (1 | Family/Language) + (1 | Speaker), data=info.rate.data);
+lmr1 <- lmer(IR ~ 1 + (1 | Family/Language) + (1 | Speaker), data=info.rate.data);
 lmr2 <- lmer(IR ~ 1 + (1 | Text) + (1 | Speaker), data=info.rate.data);
-lmr3 <- lmer(IR ~ 1 + (1 | Text) + (1 | Language), data=info.rate.data);
-lmr4 <- lmer(IR ~ 1 + Sex + (1 | Text) + (1 | Language) + (1 | Speaker), data=info.rate.data);
-lmr5 <- lmer(IR ~ 1 + Sex + (1 | Language) + (1 | Speaker), data=info.rate.data);
+lmr3 <- lmer(IR ~ 1 + (1 | Text) + (1 | Family/Language), data=info.rate.data);
+lmr4 <- lmer(IR ~ 1 + Sex + (1 | Text) + (1 | Family/Language) + (1 | Speaker), data=info.rate.data);
+lmr5 <- lmer(IR ~ 1 + Sex + (1 | Family/Language) + (1 | Speaker), data=info.rate.data);
 lmr6 <- lmer(IR ~ 1 + Sex + (1 | Text) + (1 | Speaker), data=info.rate.data);
-lmr7 <- lmer(IR ~ 1 + Sex + (1 | Text) + (1 | Language), data=info.rate.data);
+lmr7 <- lmer(IR ~ 1 + Sex + (1 | Text) + (1 | Family/Language), data=info.rate.data);
 
 tmp <- do.call(rbind, lapply(list(lmr0, lmr1, lmr2, lmr3, lmr4, lmr5, lmr6, lmr7), 
                 function(lmr) data.frame("model"=as.character(summary(lmr, ddf="lme4")$call$formula)[3], "AIC"=round(AIC(lmr),2), "BIC"=round(BIC(lmr),2))));
@@ -617,20 +775,25 @@ knitr::kable(tmp, row.names=FALSE, caption="AIC and BIC for various hierarchical
 
 #### Residuals and random effects
 
-We consider here the full model `IR ~ 1 + Sex +  (1|Text) + (1|Language) + (1|Speaker)`.
+We consider here the full model `IR ~ 1 + Sex +  (1|Text) + (1|Family/Language) + (1|Speaker)`.
 
 ```{r IR_assumptions, echo=F}
-lmr <- lmer(IR ~ 1 + Sex +  (1|Text) + (1|Language) + (1|Speaker), data=info.rate.data)
+lmr <- lmer(IR ~ 1 + Sex +  (1|Text) + (1|Family/Language) + (1|Speaker), data=info.rate.data)
 #summary(lmr)
 plot(lmr)
 get_re_distrib(residuals(lmr), "Residuals")
 get_re_distrib(ranef(lmr)$Text[,1], "Levels of Text as random effect")
 get_re_distrib(ranef(lmr)$Language[,1],  "Levels of Language as random effect")
+get_re_distrib(ranef(lmr)$Family[,1],  "Levels of Family as random effect")
 get_re_distrib(ranef(lmr)$Speaker[,1], "Levels of Speaker as random effect")
-sjp.lmer(lmr0,
-         facet.grid = FALSE,
-         sort.est = "sort.all",
-         y.offset = .4)
+# sjp.lmer(lmr0,
+#          facet.grid = FALSE,
+#          sort.est = "sort.all",
+#          y.offset = .4)
+#plot_model(lmr,
+#         facet.grid = FALSE,
+#         sort.est = "sort.all",
+#         y.offset = .4)
 ```
 
 
@@ -644,12 +807,14 @@ We will use a Gaussian distribution (with fixed or modelled variance).
 
 ##### Fixed *&sigma;* 
 ```{r SR_check_NO_no_sigma, echo=FALSE}
-model.NO.no.modelled.sigma.SR <- gamlss(SR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
-                                        data=info.rate.data, family=NO(mu.link="identity"),
+d <- info.rate.data[,c("SR","Sex","Text","Language","Family","Speaker")]; # use only the columns we actually need (avoid errors about NAs in other columns)
+model.NO.no.modelled.sigma.SR <- gamlss(SR ~ 1 + Sex + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                                        data=d, 
+                                        family=NO(mu.link="identity"),
                                         control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
 
 plot(model.NO.no.modelled.sigma.SR)
-wp(model.NO.no.modelled.sigma.SR, ylim.all=0.4)
+wp(model.NO.no.modelled.sigma.SR, ylim.all=2)
 cat("\nDeviance=",deviance(model.NO.no.modelled.sigma.SR,  what = "G"),"\n");
 cat("\nAIC=",AIC(model.NO.no.modelled.sigma.SR),"\n");
 ```
@@ -657,9 +822,11 @@ cat("\nAIC=",AIC(model.NO.no.modelled.sigma.SR),"\n");
 ##### Modelled *&sigma;* 
 
 ```{r SR_check_NO, echo=FALSE}
-model.NO.SR <- gamlss(SR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
-                      sigma.fo = ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
-                      data=info.rate.data, family=NO(mu.link="identity"), 
+d <- info.rate.data[,c("SR","Sex","Text","Language","Family","Speaker")]; # use only the columns we actually need (avoid errors about NAs in other columns)
+model.NO.SR <- gamlss(SR ~ 1 + Sex + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                      sigma.fo = ~ 1 + Sex + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                      data=d, 
+                      family=NO(mu.link="identity"), 
                       control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
 
 plot(model.NO.SR)
@@ -687,9 +854,13 @@ getSmo(model.NO.SR, "mu", which = 1)
 ```{r SR_re_mu_lg, echo=FALSE}
 getSmo(model.NO.SR, "mu", which = 2)
 ```
+**Family**
+```{r SR_re_mu_fam, echo=FALSE}
+getSmo(model.NO.SR, "mu", which = 3)
+```
 **Speaker**
 ```{r SR_re_mu_spk, echo=FALSE}
-getSmo(model.NO.SR, "mu", which = 3)
+getSmo(model.NO.SR, "mu", which = 4)
 ``` 
 
 ##### *&sigma;*
@@ -702,9 +873,13 @@ getSmo(model.NO.SR, "sigma", which = 1)
 ```{r SR_re_sigma_lg, echo=FALSE}
 getSmo(model.NO.SR, "sigma", which = 2)
 ```
+**Family**
+```{r SR_re_sigma_fam, echo=FALSE}
+getSmo(model.NO.SR, "sigma", which = 3)
+```
 **Speaker**
 ```{r SR_re_sigma_spk, echo=FALSE}
-getSmo(model.NO.SR, "sigma", which = 3)
+getSmo(model.NO.SR, "sigma", which = 4)
 ``` 
 
 
@@ -714,8 +889,10 @@ getSmo(model.NO.SR, "sigma", which = 3)
 
 ##### Fixed *&sigma;* 
 ```{r IR_check_NO_no_sigma, echo=FALSE}
-model.NO.no.modelled.sigma.IR <- gamlss(IR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
-                                        data=info.rate.data, family=NO(mu.link="identity"),
+d <- info.rate.data[,c("IR","Sex","Text","Language","Family","Speaker")]; # use only the columns we actually need (avoid errors about NAs in other columns)
+model.NO.no.modelled.sigma.IR <- gamlss(IR ~ 1 + Sex + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                                        data=d, 
+                                        family=NO(mu.link="identity"),
                                         control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
 
 plot(model.NO.no.modelled.sigma.IR)
@@ -727,9 +904,11 @@ cat("\nAIC=",AIC(model.NO.no.modelled.sigma.IR),"\n");
 ##### Modelled *&sigma;* 
 
 ```{r IR_check_NO, echo=FALSE}
-model.NO.IR <- gamlss(IR ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
-                      sigma.fo = ~ 1 + Sex + random(Text) + random(Language) + random(Speaker), 
-                      data=info.rate.data, family=NO(mu.link="identity"), 
+d <- info.rate.data[,c("IR","Sex","Text","Language","Family","Speaker")]; # use only the columns we actually need (avoid errors about NAs in other columns)
+model.NO.IR <- gamlss(IR ~ 1 + Sex + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                      sigma.fo = ~ 1 + Sex + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                      data=d, 
+                      family=NO(mu.link="identity"), 
                       control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
 
 plot(model.NO.IR)
@@ -757,9 +936,13 @@ getSmo(model.NO.IR, "mu", which = 1)
 ```{r IR_re_mu_lg, echo=FALSE}
 getSmo(model.NO.IR, "mu", which = 2)
 ```
+**Family**
+```{r IR_re_mu_fam, echo=FALSE}
+getSmo(model.NO.IR, "mu", which = 3)
+```
 **Speaker**
 ```{r IR_re_mu_spk, echo=FALSE}
-getSmo(model.NO.IR, "mu", which = 3)
+getSmo(model.NO.IR, "mu", which = 4)
 ``` 
 
 ##### *&sigma;*
@@ -772,21 +955,26 @@ getSmo(model.NO.IR, "sigma", which = 1)
 ```{r IR_re_sigma_lg, echo=FALSE}
 getSmo(model.NO.IR, "sigma", which = 2)
 ```
+**Family**
+```{r IR_re_sigma_fam, echo=FALSE}
+getSmo(model.NO.IR, "sigma", which = 3)
+```
 **Speaker**
 ```{r IR_re_sigma_spk, echo=FALSE}
-getSmo(model.NO.IR, "sigma", which = 3)
+getSmo(model.NO.IR, "sigma", which = 4)
 ``` 
-
 
 ## Modelling the relationship between SR and ID
 
-Let's model SR with ID as an additional predictor (fixed effect).
-*N.B.* In this case, we must drop Language as a random effect, since each language has, by definition, only one value of ID.
+Let's model *SR* with *ID* as an additional predictor (fixed effect) interacting with *Sex*.
+*N.B.* In this case, we must drop *Language* as a random effect, since each language has, by definition, only one value of *ID.*
 
 ```{r SR_ID_gamlss, echo=FALSE}
-model.NO.SR.ID <- gamlss(SR ~ 1 + ID + Sex + random(Text) + random(Speaker), 
-                         sigma.fo = ~ 1 + ID + Sex + random(Text) + random(Speaker), 
-                         data=info.rate.data, family=NO(mu.link="identity"), 
+d <- info.rate.data[,c("SR","ID","Sex","Text","Family","Speaker")]; # use only the columns we actually need (avoid errors about NAs in other columns)
+model.NO.SR.ID <- gamlss(SR ~ 1 + ID * Sex + random(Text) + random(Speaker) + random(Family), 
+                         sigma.fo = ~ 1 + ID + Sex + random(Text) + random(Speaker) + random(Family), 
+                         data=d, 
+                         family=NO(mu.link="identity"), 
                          control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
 
 summary(model.NO.SR.ID)
@@ -796,12 +984,13 @@ cat("\nDeviance=",deviance(model.NO.SR.ID,  what = "G"),"\n");
 cat("\nAIC=",AIC(model.NO.SR.ID),"\n");
 ```
 
-Adding ID as a predictor improves the fits (as judged by AIC).
+Adding *ID* as a predictor improves the fits (as judged by AIC).
 There is a negative estimate for ID, but significance is difficult to assess with GAMLSS model involving smoothing functions.
-However, also using a simple lmer model we have a significant effect of ID:
+However, also using a simple `lmer` model we have a significant effect of *ID*:
 
 ```{r SR_ID_lmer, echo=FALSE}
-lmer.SR.ID <- lmer(SR ~ 1 + ID + Sex + (1 | Text) + (1 | Speaker), data=info.rate.data)
+lmer.SR.ID <- lmer(SR ~ 1 + ID * Sex + (1 | Text) + (1 | Speaker) + (1 | Family), data=info.rate.data)
+summary(lmer.SR.ID)
 anova(lmer.SR.ID)
 ```
 
@@ -818,6 +1007,10 @@ getSmo(model.NO.SR.ID, "mu", which = 1)
 ```{r SR_ID_re_mu_spk, echo=FALSE}
 getSmo(model.NO.SR.ID, "mu", which = 2)
 ``` 
+**Family**
+```{r SR_ID_re_mu_fam, echo=FALSE}
+getSmo(model.NO.SR.ID, "mu", which = 3)
+``` 
 
 #### *&sigma;*
 
@@ -826,25 +1019,432 @@ getSmo(model.NO.SR.ID, "mu", which = 2)
 getSmo(model.NO.SR.ID, "sigma", which = 1)
 ```
 **Speaker**
-```{r SR_ID_re_sigma_lg, echo=FALSE}
+```{r SR_ID_re_sigma_spk, echo=FALSE}
 getSmo(model.NO.SR.ID, "sigma", which = 2)
 ```
+**Family**
+```{r SR_ID_re_sigma_fam, echo=FALSE}
+getSmo(model.NO.SR.ID, "sigma", which = 3)
+```
+
+
+
+## Do *Age* and *Sex* matter?
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+sr.sex.age.lmer <-lmer(SR ~ Age * Sex + (1 | Text) + (1 | Language), data=info.rate.data); # models fails to converge with Family
+summary(sr.sex.age.lmer);
+
+ir.sex.age.lmer <-lmer(IR ~ Age * Sex + (1 | Text) + (1 | Family/Language), data=info.rate.data);
+summary(ir.sex.age.lmer);
+```
+
+So, it seems *Age* and *Sex* are both worth including in our models (even if we have to discard quite a bit of data because of missing *Age* info) (in fact, the effect of *Age* seems more significant than that of *Sex*).
+
+In the following, we investigate if *Age* does matter when using GAMLSS modelling.
+
+
+### GAMLSS with Age
+
+Bescause there is missing data from *Age*, and because the GAMLSS models require no missing data, we will fit the models with *Age* (and its interaction with *Sex*) on the subset of the data that contains only those speakers with *Age* info.
+To make comparability possible, we also fit the same models but without *Age* on the exact same subset of the data.
+
+```{r subselect the dataset contaning only the relevant info (including Age), echo=FALSE}
+info.rate.data.for.age <- subset(info.rate.data[,c("SR","IR","ID","Sex","Text","Language","Family","Speaker","Age")], !is.na(Age)); # use only the columns we actually need (and remove the NAs)
+info.rate.data.for.age[] <- lapply(info.rate.data.for.age, function(x) if(is.factor(x)) factor(x) else x); # and make sure the factors don't have left-over levels
+# Make sure we use contrasts to the overall mean for factors:
+contrasts(info.rate.data.for.age$Text) <- contr.sum(length(levels(info.rate.data.for.age$Text)));
+contrasts(info.rate.data.for.age$Speaker) <- contr.sum(length(levels(info.rate.data.for.age$Speaker)));
+contrasts(info.rate.data.for.age$Language) <- contr.sum(length(levels(info.rate.data.for.age$Language)));
+contrasts(info.rate.data.for.age$Sex) <- contr.sum(length(levels(info.rate.data.for.age$Sex)));
+contrasts(info.rate.data.for.age$Family) <- contr.sum(length(levels(info.rate.data.for.age$Family)));
+```
+
+#### SR
+
+##### Fixed or modelled *&sigma;* (variance)
+
+###### Fixed *&sigma;* 
+
+```{r SR_check_NO_no_sigma_age, echo=FALSE}
+model.NO.no.modelled.sigma.noage.SR <- gamlss(SR ~ 1 + Sex + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                                              data=info.rate.data.for.age, 
+                                              family=NO(mu.link="identity"),
+                                              control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.no.modelled.sigma.age.SR <- gamlss(SR ~ 1 + Sex * Age + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                                            data=info.rate.data.for.age, 
+                                            family=NO(mu.link="identity"),
+                                            control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.no.modelled.sigma.age.noint.SR <- gamlss(SR ~ 1 + Sex + Age + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                                                  data=info.rate.data.for.age, 
+                                                  family=NO(mu.link="identity"),
+                                                  control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+#summary(model.NO.no.modelled.sigma.noage.SR);
+#summary(model.NO.no.modelled.sigma.age.SR);
+#summary(model.NO.no.modelled.sigma.age.noint.SR);
+
+plot(model.NO.no.modelled.sigma.age.SR);
+wp(model.NO.no.modelled.sigma.age.SR, ylim.all=0.8);
+```
+
+The model including *Age* * *Sex* is:
+```{r echo=FALSE}
+summary(model.NO.no.modelled.sigma.age.SR);
+```
+
+The compared models are:
+
+| Model         | Deviance                                                                    | AIC                                                       |
+|---------------|-----------------------------------------------------------------------------|-----------------------------------------------------------|
+| *Age* * *Sex* | `r round(deviance(model.NO.no.modelled.sigma.age.SR,  what = "G"),1)`       | `r round(AIC(model.NO.no.modelled.sigma.age.SR),1)`       |
+| *Age* + *Sex* | `r round(deviance(model.NO.no.modelled.sigma.age.noint.SR,  what = "G"),1)` | `r round(AIC(model.NO.no.modelled.sigma.age.noint.SR),1)` |
+| *Sex*         | `r round(deviance(model.NO.no.modelled.sigma.noage.SR,  what = "G"),1)`     | `r round(AIC(model.NO.no.modelled.sigma.noage.SR),1)`     |
+
+So, even if *Age* has a significant (negative) effect and interaction with *Sex* (positive for males), adding it does not seem to be warranted here...
+
+
+###### Modelled *&sigma;* 
+
+```{r SR_check_NO_age, echo=FALSE}
+model.NO.noage.SR <- gamlss(SR ~ 1 + Sex + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                            sigma.fo = ~ 1 + Sex + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                            data=info.rate.data.for.age, 
+                            family=NO(mu.link="identity"), 
+                            control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.age.SR <- gamlss(SR ~ 1 + Sex * Age + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                          sigma.fo = ~ 1 + Sex * Age + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                          data=info.rate.data.for.age, 
+                          family=NO(mu.link="identity"), 
+                          control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.age.noint.SR <- gamlss(SR ~ 1 + Sex + Age + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                                sigma.fo = ~ 1 + Sex + Age + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                                data=info.rate.data.for.age, 
+                                family=NO(mu.link="identity"), 
+                                control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+
+#summary(model.NO.noage.SR);
+#summary(model.NO.age.SR);
+#summary(model.NO.age.noint.SR);
+
+plot(model.NO.age.SR)
+wp(model.NO.age.SR, ylim.all=0.4)
+```
+
+The model including *Age* * *Sex* is:
+```{r echo=FALSE}
+summary(model.NO.age.SR);
+```
+
+The compared models are:
+
+| Model         | Deviance                                                  | AIC                                     |
+|---------------|-----------------------------------------------------------|-----------------------------------------|
+| *Age* * *Sex* | `r round(deviance(model.NO.age.SR,  what = "G"),1)`       | `r round(AIC(model.NO.age.SR),1)`       |
+| *Age* + *Sex* | `r round(deviance(model.NO.age.noint.SR,  what = "G"),1)` | `r round(AIC(model.NO.age.noint.SR),1)` |
+| *Sex*         | `r round(deviance(model.NO.noage.SR,  what = "G"),1)`     | `r round(AIC(model.NO.noage.SR),1)`     |
+
+So, even if *Age* has a significant (negative) effect (but no interaction with *Sex*), adding it does not seem to be warranted here either...
+
+The distribution of the residuals is less heteroscedastic than before and the fit to the data better.
+
+##### Summary
+
+Thus, for *SR*, even if there is a hint that *Age* might affect it negatively (and there might also be an interaction with *Sex* with a positive effect for males), overall, the various fit indices do not warrant its inclusion in the GAMLSS models.
+
+
+#### IR
+
+##### Fixed or modelled *&sigma;* (variance)
+
+###### Fixed *&sigma;* 
+
+```{r IR_check_NO_no_sigma_age, echo=FALSE}
+model.NO.no.modelled.sigma.noage.IR <- gamlss(IR ~ 1 + Sex + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                                              data=info.rate.data.for.age, 
+                                              family=NO(mu.link="identity"),
+                                              control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.no.modelled.sigma.age.IR <- gamlss(IR ~ 1 + Sex * Age + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                                            data=info.rate.data.for.age, 
+                                            family=NO(mu.link="identity"),
+                                            control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.no.modelled.sigma.age.noint.IR <- gamlss(IR ~ 1 + Sex + Age + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                                                  data=info.rate.data.for.age, 
+                                                  family=NO(mu.link="identity"),
+                                                  control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+#summary(model.NO.no.modelled.sigma.noage.IR);
+#summary(model.NO.no.modelled.sigma.age.IR);
+#summary(model.NO.no.modelled.sigma.age.noint.IR);
+
+plot(model.NO.no.modelled.sigma.age.IR);
+wp(model.NO.no.modelled.sigma.age.IR, ylim.all=0.8);
+```
+
+The model including *Age* * *Sex* is:
+```{r echo=FALSE}
+summary(model.NO.no.modelled.sigma.age.IR);
+```
+
+The compared models are:
+
+| Model         | Deviance                                                                    | AIC                                                       |
+|---------------|-----------------------------------------------------------------------------|-----------------------------------------------------------|
+| *Age* * *Sex* | `r round(deviance(model.NO.no.modelled.sigma.age.IR,  what = "G"),1)`       | `r round(AIC(model.NO.no.modelled.sigma.age.IR),1)`       |
+| *Age* + *Sex* | `r round(deviance(model.NO.no.modelled.sigma.age.noint.IR,  what = "G"),1)` | `r round(AIC(model.NO.no.modelled.sigma.age.noint.IR),1)` |
+| *Sex*         | `r round(deviance(model.NO.no.modelled.sigma.noage.IR,  what = "G"),1)`     | `r round(AIC(model.NO.no.modelled.sigma.noage.IR),1)`     |
+
+So, even if *Age* has a significant (negative) effect and interaction with *Sex* (positive for males) -- interestingly, in this case the main effect of *Sex* disappears --, adding it does not seem to be warranted...
+
+
+###### Modelled *&sigma;* 
+
+```{r IR_check_NO_age, echo=FALSE}
+model.NO.noage.IR <- gamlss(IR ~ 1 + Sex + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                            sigma.fo = ~ 1 + Sex + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                            data=info.rate.data.for.age, 
+                            family=NO(mu.link="identity"), 
+                            control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.age.IR <- gamlss(IR ~ 1 + Sex * Age + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                          sigma.fo = ~ 1 + Sex * Age + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                          data=info.rate.data.for.age, 
+                          family=NO(mu.link="identity"), 
+                          control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+model.NO.age.noint.IR <- gamlss(IR ~ 1 + Sex + Age + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                                sigma.fo = ~ 1 + Sex + Age + random(Text) + random(Language) + random(Family) + random(Speaker), 
+                                data=info.rate.data.for.age, 
+                                family=NO(mu.link="identity"), 
+                                control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800));
+
+#summary(model.NO.noage.IR);
+#summary(model.NO.age.IR);
+#summary(model.NO.age.noint.IR);
+
+plot(model.NO.age.IR)
+wp(model.NO.age.IR, ylim.all=0.4)
+```
+
+The model including *Age* * *Sex* is:
+```{r echo=FALSE}
+summary(model.NO.age.IR);
+```
+
+The compared models are:
+
+| Model         | Deviance                                                  | AIC                                     |
+|---------------|-----------------------------------------------------------|-----------------------------------------|
+| *Age* * *Sex* | `r round(deviance(model.NO.age.IR,  what = "G"),1)`       | `r round(AIC(model.NO.age.IR),1)`       |
+| *Age* + *Sex* | `r round(deviance(model.NO.age.noint.IR,  what = "G"),1)` | `r round(AIC(model.NO.age.noint.IR),1)` |
+| *Sex*         | `r round(deviance(model.NO.noage.IR,  what = "G"),1)`     | `r round(AIC(model.NO.noage.IR),1)`     |
+
+So, even if *Age* has a significant (negative) effect and interaction with *Sex* (positive for males) -- interestingly, in this case the main effect of *Sex* disappears --, adding it does not seem to be warranted...
+
+The distribution of the residuals is less heteroscedastic than before and the fit to the data better.
+
+##### Summary
+
+Thus, while for *IR* the hint that *Age* has a negative main effect and interacts with *Sex* (with a positive effect for males, containing the whole effect of *Sex*) is much stronger, the various fit indices do not warrant its inclusion in the GAMLSS models.
+
+
+### Modelling the relationship between SR and ID
+
+```{r SR_ID_gamlss_age, echo=FALSE}
+model.NO.SR.ID.age <- gamlss(SR ~ 1 + ID + Sex * Age + random(Text) + random(Speaker) + random(Family), 
+                             sigma.fo = ~ 1 + ID + Sex * Age + random(Text) + random(Speaker) + random(Family), 
+                             data=info.rate.data.for.age, 
+                             family=NO(mu.link="identity"), 
+                             control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+model.NO.SR.ID.age.i <- gamlss(SR ~ 1 + ID * Sex * Age + random(Text) + random(Speaker) + random(Family), 
+                             sigma.fo = ~ 1 + ID * Sex * Age + random(Text) + random(Speaker) + random(Family), 
+                             data=info.rate.data.for.age, 
+                             family=NO(mu.link="identity"), 
+                             control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+model.NO.SR.ID.age.noint <- gamlss(SR ~ 1 + ID + Sex + Age + random(Text) + random(Speaker) + random(Family), 
+                             sigma.fo = ~ 1 + ID + Sex + Age + random(Text) + random(Speaker) + random(Family), 
+                             data=info.rate.data.for.age, 
+                             family=NO(mu.link="identity"), 
+                             control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+model.NO.SR.ID.age.noint.i <- gamlss(SR ~ 1 + ID * Sex + Age + random(Text) + random(Speaker) + random(Family), 
+                             sigma.fo = ~ 1 + ID * Sex + Age + random(Text) + random(Speaker) + random(Family), 
+                             data=info.rate.data.for.age, 
+                             family=NO(mu.link="identity"), 
+                             control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+model.NO.SR.ID.noage <- gamlss(SR ~ 1 + ID + Sex + random(Text) + random(Speaker) + random(Family), 
+                             sigma.fo = ~ 1 + ID + Sex + random(Text) + random(Speaker) + random(Family), 
+                             data=info.rate.data.for.age, 
+                             family=NO(mu.link="identity"), 
+                             control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+model.NO.SR.ID.noage.i <- gamlss(SR ~ 1 + ID * Sex + random(Text) + random(Speaker) + random(Family), 
+                             sigma.fo = ~ 1 + ID * Sex + random(Text) + random(Speaker) + random(Family), 
+                             data=info.rate.data.for.age, 
+                             family=NO(mu.link="identity"), 
+                             control = gamlss.control(n.cyc = 800, trace = FALSE), i.control=glim.control(bf.cyc = 800))
+
+#summary(model.NO.SR.ID.age)
+#summary(model.NO.SR.ID.age.noint)
+#summary(model.NO.SR.ID.noage)
+
+plot(model.NO.SR.ID.age)
+wp(model.NO.SR.ID.age, ylim.all=0.5)
+```
+
+The model including *Age* * *Sex* is:
+```{r echo=FALSE}
+summary(model.NO.SR.ID.age);
+```
+
+The compared models are:
+
+| Model                | Deviance                                                       | AIC                                          |
+|----------------------|----------------------------------------------------------------|----------------------------------------------|
+| *ID* * *Sex* * *Age* | `r round(deviance(model.NO.SR.ID.age.i,  what = "G"),1)`       | `r round(AIC(model.NO.SR.ID.age.i),1)`       |
+| *ID* + *Sex* * *Age* | `r round(deviance(model.NO.SR.ID.age,  what = "G"),1)`         | `r round(AIC(model.NO.SR.ID.age),1)`         |
+| *ID* * *Sex* + *Age* | `r round(deviance(model.NO.SR.ID.age.noint.i,  what = "G"),1)` | `r round(AIC(model.NO.SR.ID.age.noint.i),1)` |
+| *ID* + *Sex* + *Age* | `r round(deviance(model.NO.SR.ID.age.noint,  what = "G"),1)`   | `r round(AIC(model.NO.SR.ID.age.noint),1)`   |
+| *ID* * *Sex*         | `r round(deviance(model.NO.SR.ID.noage.i,  what = "G"),1)`     | `r round(AIC(model.NO.SR.ID.noage.i),1)`     |
+| *ID* + *Sex*         | `r round(deviance(model.NO.SR.ID.noage,  what = "G"),1)`       | `r round(AIC(model.NO.SR.ID.noage),1)`       |
+
+Clearly, adding *Age* is not warranted here (as is the interaction between *ID* and *Sex*)...
+
+As above, we also looked at the simple lmer model:
+
+```{r SR_ID_lmer_age, echo=FALSE}
+lmer.SR.ID.age <- lmer(SR ~ 1 + ID + Sex * Age + (1 | Text) + (1 | Speaker) + (1 | Family), data=info.rate.data.for.age)
+lmer.SR.ID.age.i <- lmer(SR ~ 1 + ID * Sex * Age + (1 | Text) + (1 | Speaker) + (1 | Family), data=info.rate.data.for.age)
+lmer.SR.ID.age.noint <- lmer(SR ~ 1 + ID + Sex + Age + (1 | Text) + (1 | Speaker) + (1 | Family), data=info.rate.data.for.age)
+lmer.SR.ID.age.noint.i <- lmer(SR ~ 1 + ID * Sex + Age + (1 | Text) + (1 | Speaker) + (1 | Family), data=info.rate.data.for.age)
+lmer.SR.ID.noage <- lmer(SR ~ 1 + ID + Sex + (1 | Text) + (1 | Speaker) + (1 | Family), data=info.rate.data.for.age)
+lmer.SR.ID.noage.i <- lmer(SR ~ 1 + ID * Sex + (1 | Text) + (1 | Speaker) + (1 | Family), data=info.rate.data.for.age)
+```
+
+The compared models are:
+
+| Model                | AIC                                      |
+|----------------------|------------------------------------------|
+| *ID* * *Sex* * *Age* | `r round(AIC(lmer.SR.ID.age.i),1)`       |
+| *ID* + *Sex* * *Age* | `r round(AIC(lmer.SR.ID.age),1)`         |
+| *ID* * *Sex* + *Age* | `r round(AIC(lmer.SR.ID.age.noint.i),1)` |
+| *ID* + *Sex* + *Age* | `r round(AIC(lmer.SR.ID.age.noint),1)`   |
+| *ID* * *Sex*         | `r round(AIC(lmer.SR.ID.noage.i),1)`     |
+| *ID* + *Sex*         | `r round(AIC(lmer.SR.ID.noage),1)`       |
+
+The best model is still the one not including *Age*:
+```{r echo=FALSE}
+summary(lmer.SR.ID.noage);
+```
+
+### Conclusions about *Age*
+
+Within the limits of our reduced dataset (containing only `r tmp <- unique(info.rate.data[,c("Speaker","Age")]); sum(!is.na(tmp$Age))` speakers with *Age* info), we found the following:
+
+When modelling *SR* and *IR* with *GAMLSS*, while there are hints that *Age* has, for both, overall:
+  
+  - a **negative** main effect (i.e., *older* speakers of both sexes are *slower* and transmit *less information* per unit time across texts and languages), and
+  - an **interaction** with *Sex* (*positive* for *males*, i.e., males are *less negatively affected* by age that females across texts and languages),
+    
+It does *not* seem warranted to include it in these models.
+  
+When modelling the *relationship* between *SR* and *ID*, this *negative relationship*:
+
+  - seems **strengthened** with increasing *Age* (i.e., older speakers of both sexes show a stronger negative relationship between *SR* and *ID*), and 
+  - there is an **interaction** with *Sex* (for females, this effect of *Age* is stronger than for males), 
+  
+but, alas, the inclusion of *Age* is not warranted in the *GAMLSS model*, nor (really) in the simpler *LMER model*.
+
+Thus, while *Age* seems to **negatively influence** (in a **sex-dependent manner**) both *SR* and *IR*, as well as **strengthen** the *negative relationship* between them, its effects are **far from clear** in the current dataset.
+
+
+## Is there any relationship between *ID*, *Age* and *Sex*?
+
+Here we test the hypothesis that *ID* is confounded by *Age* and *Sex* structures between languages:
+
+```{r ID_age_sex, echo=FALSE}
+model.ID.age.sex <- lmer(ID ~ 1 + Sex * Age + (1 | Family), data=info.rate.data.for.age);
+model.ID.age     <- update(model.ID.age.sex, . ~ . - Sex:Age - Sex); anova(model.ID.age, model.ID.age.sex);
+model.ID         <- update(model.ID.age, . ~ . - Age); anova(model.ID, model.ID.age.sex);
+
+summary(model.ID.age.sex);
+```
+
+Thus, there does not seem to be any relationship between *ID*, *Age* and *Sex*.
+
+
+## Relationship between *ID* and the *syntagmatic density of information ratio* (SDIR)
+
+In our case, SDIR (versus *Vietnamese*) is reduced to the ratio between the number of syllables (*NS*) in *Vietnamese* and the *NS* in the language *L* for each *Text* separately; we denote this here also as *NSVR* (from "NS Vietnamese Ratio").
+
+### *SDIR* separately for each *Text* and *Language*
+
+```{r ID vs SDIR, message = FALSE, echo=FALSE, fig.width=9, fig.height=10, fig.cap="Syntagmatic density of information ratio *SDIR* (relative to Vietnamese) versus *ID* with LOESS smoother (black) and linear regression (yellow) and their 95%CIs."}
+# The data: just the Text-level info:
+d <- unique(info.rate.data[,c("Text", "Language", "Family", "ID", "NSVR")]);
+
+# Plot:
+ggplot(d, aes(x=ID, y=NSVR, color=Family)) + 
+  geom_point(alpha=0.50, size=1) + 
+  geom_smooth(method="lm", color="yellow") +
+  geom_smooth(method="loess", color="black") + 
+  geom_label_repel(aes(x=ID, y=x, label=Language, fill=Family), color="black", alpha=0.5, size=3, show.legend = FALSE, 
+                   data=aggregate(d$NSVR, by=d[c("ID","Language","Family")], max)) +
+  ylab("SDIR (relative to Vietnamese)") + xlab("ID") + 
+  theme(legend.position="bottom") +
+  NULL;
+```
+
+The "flat" correlations (Pearson and Spearman) between *SDIR* and *ID* are: 
+```{r message = FALSE, echo=FALSE}
+cor.test(d$NSVR, d$ID, method="pearson");
+cor.test(d$NSVR, d$ID, method="spearman");
+```
+
+The multi-level regression of *SDIR* on *ID* (with *Text* as random effect) and the *Text*'s ICC are:
+```{r message = FALSE, echo=FALSE}
+m0 <- lmer(NSVR ~ ID + (1 | Text), data=d);
+summary(m0);
+icc(m0);
+```
+
+### Average *SDIR* across *Text*s for each *Language*
+
+If we consider just the **average *SDIR* ** for each language:
+
+```{r ID vs average SDIR, message = FALSE, echo=FALSE, fig.width=9, fig.height=10, fig.cap="Average syntagmatic density of information ratio *SDIR* (relative to Vietnamese) versus *ID* with LOESS smoother (black) and linear regression (yellow) and their 95%CIs."}
+# The data: just the Text-level info:
+d <- unique(info.rate.data[,c("Text", "Language", "Family", "ID", "NSVR")]);
+d1 <- aggregate(d$NSVR, by=d[c("Language", "Family", "ID")], mean); names(d1)[ncol(d1)] <- "NSVR.mean";
+
+# Plot:
+ggplot(d1, aes(x=ID, y=NSVR.mean, color=Family)) + 
+  geom_point(alpha=0.50, size=1) + 
+  geom_smooth(method="lm", color="yellow") +
+  geom_smooth(method="loess", color="black") + 
+  geom_label_repel(aes(x=ID, y=NSVR.mean, label=Language, fill=Family), color="black", alpha=0.5, size=3, show.legend = FALSE) +
+  ylab("Average SDIR (relative to Vietnamese)") + xlab("ID") + 
+  theme(legend.position="bottom") +
+  NULL;
+
+cor.test(d1$NSVR.mean, d1$ID, method="pearson");
+cor.test(d1$NSVR.mean, d1$ID, method="spearman");
+
+m1 <- lm(NSVR.mean ~ ID, data=d1);
+summary(m1);
+```
+
 
 
 ## Mixture of Gaussians
 
-In what follows, mixing probabilities are independent from factors such as Sex.
+In what follows, mixing probabilities is done independently from factors such as Sex.
 
 ### SR
 
 Between 1 and 5 Gaussian distributions:
 
 ```{r SR_mixture, message = FALSE, echo=FALSE}
-mix.SR.NO.1 <- gamlssMX(SR ~ 1, family=NO, K=1, data=info.rate.data, plot=FALSE)
-mix.SR.NO.2 <- gamlssMX(SR ~ 1, family=NO, K=2, data=info.rate.data, plot=FALSE)
-mix.SR.NO.3 <- gamlssMX(SR ~ 1, family=NO, K=3, data=info.rate.data, plot=FALSE)
-mix.SR.NO.4 <- gamlssMX(SR ~ 1, family=NO, K=4, data=info.rate.data, plot=FALSE)
-mix.SR.NO.5 <- gamlssMX(SR ~ 1, family=NO, K=5, data=info.rate.data, plot=FALSE)
+d <- info.rate.data[,c("SR"),drop=FALSE]; # use only the columns we actually need (avoid errors about NAs in other columns)
+mix.SR.NO.1 <- gamlssMX(SR ~ 1, family=NO, K=1, data=d, plot=FALSE)
+mix.SR.NO.2 <- gamlssMX(SR ~ 1, family=NO, K=2, data=d, plot=FALSE)
+mix.SR.NO.3 <- gamlssMX(SR ~ 1, family=NO, K=3, data=d, plot=FALSE)
+mix.SR.NO.4 <- gamlssMX(SR ~ 1, family=NO, K=4, data=d, plot=FALSE)
+mix.SR.NO.5 <- gamlssMX(SR ~ 1, family=NO, K=5, data=d, plot=FALSE)
 ```
 
 ***1 component***
@@ -901,11 +1501,12 @@ legend("topleft", legend=c("K=1","K=2", "K=3", "K=4", "K=5"), lty=c(2,1,2,2,2), 
 Between 1 and 5 Gaussian distributions:
 
 ```{r IR_mixture, message = FALSE, echo=FALSE}
-mix.IR.NO.1 <- gamlssMX(IR ~ 1, family=NO, K=1, data=info.rate.data, plot=FALSE)
-mix.IR.NO.2 <- gamlssMX(IR ~ 1, family=NO, K=2, data=info.rate.data, plot=FALSE)
-mix.IR.NO.3 <- gamlssMX(IR ~ 1, family=NO, K=3, data=info.rate.data, plot=FALSE)
-mix.IR.NO.4 <- gamlssMX(IR ~ 1, family=NO, K=4, data=info.rate.data, plot=FALSE)
-mix.IR.NO.5 <- gamlssMX(IR ~ 1, family=NO, K=5, data=info.rate.data, plot=FALSE)
+d <- info.rate.data[,c("IR"),drop=FALSE]; # use only the columns we actually need (avoid errors about NAs in other columns)
+mix.IR.NO.1 <- gamlssMX(IR ~ 1, family=NO, K=1, data=d, plot=FALSE)
+mix.IR.NO.2 <- gamlssMX(IR ~ 1, family=NO, K=2, data=d, plot=FALSE)
+mix.IR.NO.3 <- gamlssMX(IR ~ 1, family=NO, K=3, data=d, plot=FALSE)
+mix.IR.NO.4 <- gamlssMX(IR ~ 1, family=NO, K=4, data=d, plot=FALSE)
+mix.IR.NO.5 <- gamlssMX(IR ~ 1, family=NO, K=5, data=d, plot=FALSE)
 ```
 
 ***1 component***
@@ -962,11 +1563,11 @@ legend("topleft", legend=c("K=1","K=2", "K=3", "K=4", "K=5"), lty=c(2,1,2,2,2), 
 
 We used three ways to estimate how unimodal a distribution is, as they tend to disagree and the problem of unimodality testing is far from settled (see [Freeman & Dale, 2013](#references)):
 
-  - the **Silverman test** tests the null hypothesis that an underlying density has at most *k* modes. The null hypothesis is that the underlying density has at most *k* modes (H0: number of modes <= *k*). The result is the *p*-value (bootstrapped) of rejecting a unimodal distribution. It is described in [Silverman (1981)](#references) and [Hall & York (2001)](#references); our implementation is based on the code available at https://www.mathematik.uni-marburg.de/~stochastik/R_packages/;
-  - the **dip test** which computes Hartigans’ dip statistic *D_n_*, and its *p*-value for the test for unimodality, by interpolating tabulated quantiles of *sqrt(n) &bull; D_n_*. For *X_i_* ∼ *F*, i.i.d., the null hypothesis is that *F* is a unimodal distribution. The result is the *D* metric and the *p*-value (interpolated) of rejecting a unimodal distribution. See [Hartigan (1985)](#references) and [Hartigan & Hartigan (1985)](#references); it is implemented in package `diptest`;
+  - the **Silverman test** tests the null hypothesis that an underlying density has at most *k* modes (H0: number of modes <= *k*). The result is the *p*-value (bootstrapped) of rejecting a unimodal distribution. It is described in [Silverman (1981)](#references) and [Hall & York (2001)](#references); our implementation is based on the code available at https://www.mathematik.uni-marburg.de/~stochastik/R_packages/;
+  - the **dip test** which computes Hartigans’ dip statistic *$D_n$*, and its *p*-value for the test for unimodality, by interpolating tabulated quantiles of *sqrt(n) &bull; $D_n$*. For *$X_i$* ∼ *F*, i.i.d., the null hypothesis is that *F* is a unimodal distribution. The result is the *D* metric and the *p*-value (interpolated) of rejecting a unimodal distribution. See [Hartigan (1985)](#references) and [Hartigan & Hartigan (1985)](#references); it is implemented in package `diptest`;
   - the **bimodality coefficient** (BC) which is based on an empirical relationship between bimodality and the third and fourth statistical moments of a distribution (skewness and kurtosis). It is proportional to the division of squared skewness with uncorrected kurtosis, *BC* &asymp;  (*s*^2^ + 1)/*k*, with the underlying logic that a bimodal distribution will have very low kurtosis, an asymmetric character, or both; all of these conditions increase *BC*. The values range from 0 and 1, with those exceeding .555 (the value representing a uniform distribution) suggesting bi-modality. The result is the *DC* estimate (which must exceed 0.555 to reject a unimodal distribution). We implemented it following [Freeman & Dale (2013)](#references) as *BC* =  (*s*^2^ + 1)/(*k* + 3 &bull; ((n-1)^2^ / ((n-2) &bull; (n-3)))).
   
-For each such test, we performed four randomisation procedures to obtain an estimate of the "specialness" of the observed unimodality estimate; for each new permuted dataset, we recompute everything before estimating the unimodlaity of the permuted distribution:
+For each such test, we performed four randomisation procedures to obtain an estimate of the "specialness" of the observed unimodality estimate; for each new permuted dataset, we recomputed everything before estimating the unimodality of the permuted distribution:
 
   - Permutation model 1 (**PM1**): randomly permute the SR values freely among speakers, texts and languages;
   - Permutation model 2 (**PM2**): randomly permute the ID values among languages;
@@ -1327,7 +1928,7 @@ if( do.expensive.computations || !file.exists("./unimodality-tests-cached.RData"
 
 #### PM1
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the texts' SRs (PM1)**."}
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the SRs of the texts (PM1)**."}
 results <- NULL; # collect results for pretty printing
 
 # Plotting:
@@ -1416,7 +2017,7 @@ results <- rbind(results, data.frame("scenario"="PM1", "test"="BC", "measure"="I
 
 #### PM2
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the languages' ID (PM2)**."}
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the IDs of the languages (PM2)**."}
 # Plotting:
 par(mfrow=c(3,2));
 alpha.level = 0.05;
@@ -1596,7 +2197,7 @@ results <- rbind(results, data.frame("scenario"="PM3", "test"="BC", "measure"="I
 
 #### PM4
 
-```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the languages' average SRs with speaker adjustement (PM4)**."}
+```{r echo=FALSE, message=FALSE, warning=FALSE, fig.height=9, fig.width=6, fig.cap="**Permutation of the average SRs of the languages with speaker adjustement (PM4)**."}
 # Plotting:
 par(mfrow=c(3,2));
 alpha.level = 0.05;
@@ -1700,7 +2301,7 @@ knitr::kable(results, digits=3, row.names=FALSE,
 
 ## Pair-wise distances between languages
 
-We compute various distances between languages (as implemented by function `distance()` in package `philentropy`) in what concerns the distribution of NS, SR and ID.
+We compute various distances between languages (as implemented by the `distance()` function in package `philentropy`) in what concerns the distribution of NS, SR and ID.
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=6, fig.cap="Comparing the distribution of pairwise distances between languages."}
 # Compute all sorts of distances between all paris of grouping.var values for the values of measured.var:
@@ -1860,7 +2461,191 @@ pander(sessionInfo(), compact=TRUE);
 ```
 
 
-## Appendix II: Figures for the main paper
+## Appendix II: Speech Rate: Canonical vs. automatic detection
+
+Here we compare the Speech Rate (*SR*) used in the paper and defined as the *canonical articulatory rate* (= the number of syllables corresponding to the canonical text pronunciation per second of speech) with an estimate of the *realized speech rate*, based on the *automatic detection* of syllable nuclei implemented by the popular algorithm described in De Jong, Nivja H., and Ton Wempe. "Praat script to detect syllable nuclei and measure speech rate automatically." Behavior research methods 41.2 (2009): 385-390.
+We used their algorithm with standard parameters (except for pauses which were retrieved from our manual annotation to match the main analysis) on the actual oral productions of our speakers, and the results are available in the TAB-separated CSV file `AutomaticSylDetect.csv` with the following structure:
+
+  - **soundname**: combination of Language, Text and Speaker info
+  - **nsyll**: number of syllables
+  - **npause**: number of pauses
+  - **dur**: total duration
+  - **phonationtime**: actual duration
+
+```{r read and parse automatic syllable detection, echo=FALSE, warning=FALSE, message=FALSE}
+# Load the automatic syllabification data:
+syll.data <- read.table("./AutomaticSylDetect.csv", header=TRUE, sep="\t", quote="", strip.white=TRUE, stringsAsFactors=FALSE);
+
+# Extract language and text (and keep the minimal speaker ID only):
+syll.data <- cbind(do.call(rbind, lapply(strsplit(syll.data$soundname,"_",fixed=TRUE), function(x)
+                    {
+                      if( length(x) >= 5 )
+                      {
+                        data.frame("Speaker"=paste0(x[1],"_",x[2],"(",x[3],")"), "Language"=toupper(x[1]), "Text"=toupper(x[5]));
+                      } else if( length(x) == 3 )
+                      {
+                        data.frame("Speaker"=paste0(x[1],"_",x[2]), "Language"=toupper(x[1]), "Text"=toupper(x[3])); # special case for DEU, ENG and ITA
+                      } else
+                      {
+                        stop("Possible error in the AutomaticSylDetect.csv file...\n");
+                      }
+                    })),
+                   "Duration"=syll.data$phonationtime, 
+                   "NS"=syll.data$nsyll
+                  );
+
+# Merge to the canonical SR data:
+syll.data <- merge(syll.data, info.rate.data, by=c("Speaker", "Language", "Text"), all.x=TRUE, suffixes=c(".auto",""));
+
+# Compute SR and IR:
+syll.data$SR.auto <- (syll.data$NS.auto / syll.data$Duration.auto);
+syll.data$IR.auto <- (syll.data$SR.auto * syll.data$ID);
+
+# Sort the data:
+syll.data$Language <- as.character(syll.data$Language);
+syll.data$Speaker <- as.character(syll.data$Speaker);
+syll.data$Text <- as.character(syll.data$Text);
+syll.data <- syll.data[ order(syll.data$Language, syll.data$Speaker, syll.data$Text), ];
+
+# Convert to factors:
+syll.data$Text     <- as.factor(syll.data$Text);
+syll.data$Speaker  <- as.factor(syll.data$Speaker);
+syll.data$Language <- as.factor(syll.data$Language);
+syll.data$Family   <- as.factor(syll.data$Family);
+syll.data$Sex      <- as.factor(syll.data$Sex);
+```
+
+### NS (# of syllables):
+
+Pearson's correlation and paired t-test:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+cor.test(syll.data$NS, syll.data$NS.auto, method="pearson");
+cor.test(syll.data$NS, syll.data$NS.auto, method="spearman");
+t.test(syll.data$NS, syll.data$NS.auto, paired=TRUE);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=7, fig.height=6, fig.cap="NS: canonical (x axis) vs automatic (y axis) overall (black) and separately by language (colored)."}
+ggplot(syll.data, aes(x=NS, y=NS.auto, color=Language)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE) + 
+  geom_smooth(aes(x=NS, y=NS.auto), color="black", method="lm", formula=y ~ x, se=FALSE);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=7, fig.height=6, fig.cap="NS: canonical (x axis) vs automatic (y axis) overall (black) and separately by text (colored)."}
+ggplot(syll.data, aes(x=NS, y=NS.auto, color=Text)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE) + 
+  geom_smooth(aes(x=NS, y=NS.auto), color="black", method="lm", formula=y ~ x, se=FALSE);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=15, fig.height=14, fig.cap="NS: canonical (x axis) vs automatic (y axis) separately by text and language."}
+ggplot(syll.data, aes(x=NS, y=NS.auto, color=Language)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE, color="black") +
+  facet_grid(Language ~ Text);
+```
+
+### SR (speech rate):
+
+Pearson's correlation and paired t-test:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+cor.test(syll.data$SR, syll.data$SR.auto, method="pearson");
+cor.test(syll.data$SR, syll.data$SR.auto, method="spearman");
+t.test(syll.data$SR, syll.data$SR.auto, paired=TRUE);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=7, fig.height=6, fig.cap="SR: canonical (x axis) vs automatic (y axis) overall (black) and separately by language (colored)."}
+ggplot(syll.data, aes(x=SR, y=SR.auto, color=Language)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE) + 
+  geom_smooth(aes(x=SR, y=SR.auto), color="black", method="lm", formula=y ~ x, se=FALSE);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=7, fig.height=6, fig.cap="SR: canonical (x axis) vs automatic (y axis) overall (black) and separately by text (colored)."}
+ggplot(syll.data, aes(x=SR, y=SR.auto, color=Text)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE) + 
+  geom_smooth(aes(x=SR, y=SR.auto), color="black", method="lm", formula=y ~ x, se=FALSE);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=15, fig.height=14, fig.cap="SR: canonical (x axis) vs automatic (y axis) separately by text and language."}
+ggplot(syll.data, aes(x=SR, y=SR.auto, color=Language)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE, color="black") +
+  facet_grid(Language ~ Text);
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=13, fig.height=14, fig.cap="SR: canonical (x axis) vs automatic (y axis) separately by speaker."}
+ggplot(syll.data, aes(x=SR, y=SR.auto, color=Text)) +
+  geom_point() + 
+  geom_smooth(method="lm", formula=y ~ x, se=FALSE, color="black") +
+  facet_wrap(. ~ Speaker);
+```
+
+#### Canonical and automatic SR by language
+
+Plot, linear (mixed-effects) regression, correlation and paired t-tests:
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, fig.width=13, fig.height=14, fig.cap="SR: canonical (x axis) vs automatic (y axis) separately by language with regression line (black) and LOESS smoothing (yellow) and their 95%CIs."}
+ggplot(syll.data, aes(x=SR, y=SR.auto, color=Language)) +
+  geom_point(alpha=0.5) + 
+  geom_smooth(method="lm", formula=y ~ x, se=TRUE, color="black", alpha=0.5) + 
+  geom_smooth(method="loess", se=TRUE, color="yellow", alpha=0.5) + 
+  #geom_smooth(aes(x=SR, y=SR.auto), color="black", method="lm", formula=y ~ x, se=FALSE) + 
+  facet_wrap(. ~ Language) + 
+  xlab("SR (canonical)") + ylab("SR (automatic)");
+```
+
+**Across languages:**
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+m0 <- lmer(SR.auto ~ SR + (1 | Family/Language) + (1 | Text) + (1 | Speaker), data=syll.data); m0s <- summary(m0); print(m0s);
+icc(m0);
+r1 <- cor.test(syll.data$SR, syll.data$SR.auto, method="pearson"); #print(r1);
+r2 <- cor.test(syll.data$SR, syll.data$SR.auto, method="spearman"); #print(r2)
+t1 <- t.test(syll.data$SR, syll.data$SR.auto, paired=TRUE); #print(t1);
+
+# Collect the results:
+results <- data.frame("Language"="all",
+                      "r"=paste0("r=",sprintf("%.2f",r1$estimate), " (p=",sprintf("%.4g",r1$p.value),")"),
+                      "rho"=paste0("rho=",sprintf("%.2f",r2$estimate), " (p=",sprintf("%.4g",r2$p.value),")"),
+                      "t"=paste0("t(",sprintf("%.1f",t1$parameter),")=",sprintf("%.2f",t1$statistic), " (p=",sprintf("%.3g",t1$p.value),")"),
+                      "intercept"=paste0(sprintf("%.2f",m0s$coefficients["(Intercept)","Estimate"])," (p=",sprintf("%.3g",m0s$coefficients["(Intercept)","Pr(>|t|)"]),")"),
+                      "slope"=paste0(sprintf("%.2f",m0s$coefficients["SR","Estimate"])," (p=",sprintf("%.3g",m0s$coefficients["SR","Pr(>|t|)"]),")"));
+```
+
+**For each language separately:**
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+for( i in unique(syll.data$Language) )
+{
+  cat(paste0("\nFor *",i,"*\n\n"));
+  d <- syll.data[ syll.data$Language == i, ];
+  m0 <- lmer(SR.auto ~ SR + (1 | Text) + (1 | Speaker), data=d);
+  m0s <- summary(m0); print(m0s);
+  print(icc(m0));
+  r1 <- cor.test(d$SR, d$SR.auto, method="pearson"); #print(r1);
+  r2 <- cor.test(d$SR, d$SR.auto, method="spearman"); #print(r2);
+  t1 <- t.test(d$SR, d$SR.auto, paired=TRUE); #print(t1);
+  
+  # Collect the results:
+  results <- rbind(results,
+                   data.frame("Language"=i,
+                              "r"=paste0("r=",sprintf("%.2f",r1$estimate), " (p=",sprintf("%.4g",r1$p.value),")"),
+                              "rho"=paste0("rho=",sprintf("%.2f",r2$estimate), " (p=",sprintf("%.4g",r2$p.value),")"),
+                              "t"=paste0("t(",sprintf("%.1f",t1$parameter),")=",sprintf("%.2f",t1$statistic), " (p=",sprintf("%.3g",t1$p.value),")"),
+                              "intercept"=paste0(sprintf("%.2f",m0s$coefficients["(Intercept)","Estimate"])," (p=",sprintf("%.3g",m0s$coefficients["(Intercept)","Pr(>|t|)"]),")"),
+                              "slope"=paste0(sprintf("%.2f",m0s$coefficients["SR","Estimate"])," (p=",sprintf("%.3g",m0s$coefficients["SR","Pr(>|t|)"]),")")));
+}
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+knitr::kable(results, row.names=FALSE, 
+             col.names=c("Language", "Pearson's r", "Spearman's rho", "Paired t-test", "Intercept", "Slope"), 
+             caption="Correlations (Pearson's and Spearman's), paired t-test, and (mixed-effects, with Text, Speaker and, for the first row only, Language, as random effects) linear regression intercept and slope between automatic and canonical SR across all languages (top row) and for each language spearately).");
+```
+
+## Appendix III: Figures for the main paper
 
 Here we generate the figures used in the main paper (saved to the `./figures` folder as 600 DPI TIFF files `Figure-*.tiff`).
 
@@ -1917,6 +2702,28 @@ d <- pairwise.dists.long;
 ggboxplot(d[d$Method=="Jensen-Shannon",], x="Measure", y="Distance", color="Measure", fill="Measure", alpha=0.25) + ylab("Jensen-Shannon divergence") +
   stat_compare_means(comparisons=list(c("NS", "SR"), c("NS", "IR"), c("SR", "IR")), paired=TRUE, method="wilcox.test", p.adjust.method="bonferroni", label="p.signif") +
   theme(legend.position="none");
+dev.off();
+
+tiff("./figures/Figure-SDIR-vs-ID.tiff", width=6, height=7, units="in", compression="lzw", res=600, type="cairo");
+d <- unique(info.rate.data[,c("Text", "Language", "Family", "ID", "NSVR")]);
+ggplot(d, aes(x=ID, y=NSVR, color=Family)) + 
+  geom_point(alpha=0.50, size=1) + 
+  geom_smooth(method="lm", color="yellow") +
+  geom_smooth(method="loess", color="black") + 
+  geom_label_repel(aes(x=ID, y=x, label=Language, fill=Family), color="black", alpha=0.5, size=3, show.legend = FALSE, 
+                   data=aggregate(d$NSVR, by=d[c("ID","Language","Family")], max)) +
+  ylab("SDIR (relative to Vietnamese)") + xlab("ID") + theme(legend.position="bottom") +
+  NULL;
+dev.off();
+
+tiff("./figures/Figure-SR-can-vs-auto.tiff", width=7, height=8, units="in", compression="lzw", res=600, type="cairo");
+ggplot(syll.data, aes(x=SR, y=SR.auto, color=Language)) +
+  geom_point(alpha=0.5) + 
+  geom_smooth(method="lm", formula=y ~ x, se=TRUE, color="black", alpha=0.5) + 
+  #geom_smooth(method="loess", se=FALSE, color="yellow", alpha=0.5) + 
+  #geom_smooth(aes(x=SR, y=SR.auto), color="black", method="lm", formula=y ~ x, se=FALSE) + 
+  facet_wrap(. ~ Language) + 
+  xlab("SR (canonical)") + ylab("SR (automatic)") + theme(legend.position="bottom");
 dev.off();
 ```
 
