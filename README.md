@@ -21,3 +21,5 @@ These supplementary materials contain:
       - **phonationtime**: the duration of the actual phonation (in seconds)
   - the full Rmarkdown analysis and plotting script `InfoRate.Rmd`
   - the resulting HTML output `InfoRate.html`
+
+The **data** contained within the `CSV` files `AutomaticSylDetect.csv` and `InfoRateData.csv`, as well as the **output** `HTML` document `InfoRate.html` are released under the [CC-BY 4.0 license](https://creativecommons.org/licenses/by/4.0/), while the **source code** contained in the `RMarkdown` file `InfoRate.Rmd` is released under the [The 3-Clause BSD License (BSD-3) license](https://opensource.org/license/BSD-3-clause).
